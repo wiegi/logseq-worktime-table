@@ -1,0 +1,7 @@
+node_modules/
+dist/
+release/
+.parcel-cache/
+.parcel-cache-dev/
+.vscode/
+.DS_Store

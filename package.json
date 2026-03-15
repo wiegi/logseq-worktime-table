@@ -1,0 +1,30 @@
+{
+  "name": "logseq-worktime-table",
+  "version": "0.1.0",
+  "description": "Logseq plugin: enter up to 10 worktime rows and insert a markdown table.",
+  "license": "Apache-2.0",
+  "scripts": {
+    "dev": "parcel index.html --cache-dir .parcel-cache-dev",
+    "clean": "node scripts/clean.mjs",
+    "build": "node scripts/clean.mjs && parcel build --public-url ./ --no-source-maps index.html",
+    "pack": "node scripts/clean.mjs && node scripts/pack.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@logseq/libs": "^0.2.12",
+    "@parcel/compressor-raw": "^2.16.4",
+    "parcel": "^2.16.4",
+    "typescript": "^5.5.4"
+  },
+  "overrides": {
+    "dompurify": "3.3.3",
+    "lodash-es": "4.17.23"
+  },
+  "logseq": {
+    "id": "logseq-worktime-table",
+    "main": "dist/index.html"
+  },
+  "dependencies": {
+    "html-to-image": "^1.11.13"
+  }
+}
