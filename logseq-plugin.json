@@ -2,6 +2,6 @@
   "id": "logseq-worktime-table",
   "name": "Worktime Table",
   "description": "Enter up to 10 worktime rows and insert a Markdown table.",
-  "icon": "icon.svg",
+  "icon": "dist/icon.svg",
   "main": "dist/index.html"
 }

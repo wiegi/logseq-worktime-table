@@ -39,3 +39,8 @@ await run(process.execPath, [
   "--no-source-maps",
   "index.html",
 ]);
+
+// Some Logseq surfaces appear to resolve plugin icons relative to `main`/`dist`.
+// Parcel won't copy the icon unless it's referenced by the HTML/JS, so ensure
+// the packaged release always contains it.
+await cp("icon.svg", "release/dist/icon.svg", { force: true });

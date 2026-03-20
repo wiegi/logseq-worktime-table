@@ -21,10 +21,15 @@
     "lodash-es": "4.17.23"
   },
   "logseq": {
+    "title": "Worktime Table",
     "id": "logseq-worktime-table",
+    "icon": "./icon.svg",
     "main": "dist/index.html"
   },
   "dependencies": {
     "html-to-image": "^1.11.13"
-  }
+  },
+  "sponsors": [
+    "https://www.buymeacoffee.com/wiegi"
+  ]
 }

@@ -258,15 +258,7 @@ function registerInlineEditButton(): void {
 
     const uuid = typeof payload?.uuid === "string" ? payload.uuid : "";
 
-    const schedule = (fn: () => void) => {
-      const ric = (globalThis as any).requestIdleCallback as
-        | ((cb: () => void, opts?: { timeout?: number }) => void)
-        | undefined;
-      if (typeof ric === "function") ric(fn, { timeout: 500 });
-      else setTimeout(fn, 0);
-    };
-
-    schedule(() => {
+    try {
       logseq.provideUI({
         key: slot,
         slot,
@@ -278,7 +270,11 @@ function registerInlineEditButton(): void {
           </div>
         `,
       });
-    });
+    } catch (e) {
+      // When blocks rerender quickly (navigation, graph refresh, etc.) the slot
+      // can disappear between the event and UI injection, causing NotFoundError.
+      console.debug("[logseq-worktime-table] provideUI failed", e);
+    }
   });
 }
 
