@@ -48,9 +48,15 @@ Each table contains one or more work rows. A row can include:
 
 The plugin calculates:
 * the duration of each completed row
-* the earliest start time
+* the earliest visible start time
 * the summed total duration
-* a total end time derived from total start plus total duration
+
+By default, the **Total** row shows:
+* **Start** = earliest visible start time
+* **End** = derived end time calculated as earliest visible start plus total summed duration
+
+If you do not want these values, enable **Hide Start/End in Total row** in the plugin settings so the Total row only shows duration totals.
+
 Only rows with both **Start** and **End** values are included in the calculations.
 
 ### Time input
@@ -82,6 +88,16 @@ When enabled:
 The plugin still accepts:
 * 24-hour input such as `14:30`
 * 12-hour input such as `2:30 PM`
+
+### `disableTotalRowTimeRange`
+When enabled:
+* the **Total** row leaves Start and End empty
+* only the duration totals are shown
+
+When disabled:
+* the **Total** row shows a Start and End value
+* **Start** is the earliest visible start time in the table
+* **End** is a derived value: earliest start plus total summed duration
 
 ### `dialogPrefillJson`
 Use this setting to prefill the dialog with your own default rows and offsets.
