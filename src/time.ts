@@ -1,6 +1,6 @@
 export type ValidationResult = { ok: true } | { ok: false; message: string };
 
-const TIME_24H_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const TIME_24H_RE = /^(0?\d|1\d|2[0-3]):([0-5]\d)$/;
 const TIME_12H_RE = /^(0?[1-9]|1[0-2]):([0-5]\d)\s*([AaPp][Mm])$/;
 
 export function parseTimeToMinutes(value: string): number | null {
@@ -76,13 +76,13 @@ export function validateRow(row: InputRow): ValidationResult {
   if (start.length > 0 && parseTimeToMinutes(start) === null) {
     return {
       ok: false,
-      message: "Start time must be in HH:mm or h:mm AM/PM format.",
+      message: "Start time must be in H:mm/HH:mm or h:mm AM/PM format.",
     };
   }
   if (end.length > 0 && parseTimeToMinutes(end) === null) {
     return {
       ok: false,
-      message: "End time must be in HH:mm or h:mm AM/PM format.",
+      message: "End time must be in H:mm/HH:mm or h:mm AM/PM format.",
     };
   }
 

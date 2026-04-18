@@ -1,5 +1,10 @@
 import "./styles.css";
-import { isRowEmpty, validateRow, type InputRow } from "./time";
+import {
+  isRowEmpty,
+  parseTimeToMinutes,
+  validateRow,
+  type InputRow,
+} from "./time";
 
 export interface OffsetPreset {
   hours: number;
@@ -40,7 +45,7 @@ export function getModalController(): ModalController {
 
   modal.innerHTML = `
     <h2>Track work time</h2>
-    <p class="wt-help" id="wt-help">Times can be entered as HH:mm (24h) or h:mm AM/PM (12h). If both Start and End are present, End must be after Start. Incomplete rows are allowed but don't affect totals. Task is optional. Offsets add/subtract hours (use negative values to subtract).</p>
+    <p class="wt-help" id="wt-help">Times can be entered as H:mm or HH:mm (24h) or h:mm AM/PM (12h). If both Start and End are present, End must be after Start. Incomplete rows are allowed but don't affect totals. Task is optional. Offsets add/subtract hours (use negative values to subtract).</p>
 
     <form id="wt-form">
       <div class="wt-section-title">Worktime table</div>
@@ -245,41 +250,6 @@ export function getModalController(): ModalController {
 
   const SETTINGS_USE_12_HOUR_CLOCK = "use12HourClock";
 
-  const TIME_24H_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
-  const TIME_12H_RE = /^(0?[1-9]|1[0-2]):([0-5]\d)\s*([AaPp][Mm])$/;
-
-  function parseTimeToMinutesLocal(value: string): number | null {
-    const trimmed = value.trim();
-
-    {
-      const match = TIME_24H_RE.exec(trimmed);
-      if (match) {
-        const hours = Number(match[1]);
-        const minutes = Number(match[2]);
-        if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return null;
-        return hours * 60 + minutes;
-      }
-    }
-
-    {
-      const match = TIME_12H_RE.exec(trimmed);
-      if (match) {
-        const hours12 = Number(match[1]);
-        const minutes = Number(match[2]);
-        const ampm = String(match[3]).toLowerCase();
-        if (!Number.isInteger(hours12) || !Number.isInteger(minutes))
-          return null;
-        if (hours12 < 1 || hours12 > 12) return null;
-        const isPm = ampm === "pm";
-        const baseHours = hours12 % 12;
-        const hours24 = isPm ? baseHours + 12 : baseHours;
-        return hours24 * 60 + minutes;
-      }
-    }
-
-    return null;
-  }
-
   function readUse12HourClockFromSettings(): boolean {
     const s = (logseq as any).settings as Record<string, unknown> | undefined;
     return Boolean(s?.[SETTINGS_USE_12_HOUR_CLOCK]);
@@ -316,7 +286,7 @@ export function getModalController(): ModalController {
     const raw = value ?? "";
     const trimmed = raw.trim();
     if (trimmed.length === 0) return "";
-    const minutes = parseTimeToMinutesLocal(trimmed);
+    const minutes = parseTimeToMinutes(trimmed);
     if (minutes === null) return raw;
     return use12HourClock
       ? formatMinutesToClock12(minutes)
@@ -326,11 +296,11 @@ export function getModalController(): ModalController {
   function applyHelpText(use12HourClock: boolean): void {
     const mode = use12HourClock ? "12h (AM/PM)" : "24h (HH:mm)";
     helpEl.textContent =
-      `Times can be entered as HH:mm (24h) or h:mm AM/PM (12h). ` +
+      `Times can be entered as H:mm or HH:mm (24h) or h:mm AM/PM (12h). ` +
       `Current display mode: ${mode}. ` +
       (use12HourClock
         ? `Tip: In 12h mode you can type "8:00" and pick AM/PM in the dropdown. `
-        : "") +
+        : `Tip: In 24h mode you can type "8:00" and it will be normalized to "08:00". `) +
       `If both Start and End are present, End must be after Start. ` +
       `Incomplete rows are allowed but don't affect totals. ` +
       `Task is optional. Empty rows are kept (template). ` +
@@ -743,7 +713,7 @@ export function getModalController(): ModalController {
         const startSel = startAmPmSelects[i];
         const endSel = endAmPmSelects[i];
 
-        const startMinutes = parseTimeToMinutesLocal((row?.start ?? "").trim());
+        const startMinutes = parseTimeToMinutes((row?.start ?? "").trim());
         if (startMinutes !== null) {
           const p = minutesTo12hParts(startMinutes);
           start.value = p.time;
@@ -753,7 +723,7 @@ export function getModalController(): ModalController {
           if (startSel) startSel.value = "AM";
         }
 
-        const endMinutes = parseTimeToMinutesLocal((row?.end ?? "").trim());
+        const endMinutes = parseTimeToMinutes((row?.end ?? "").trim());
         if (endMinutes !== null) {
           const p = minutesTo12hParts(endMinutes);
           end.value = p.time;
@@ -899,12 +869,12 @@ export function getModalController(): ModalController {
               showError(`Row ${i + 1}: ${v.message}`);
               if (
                 row.start.trim().length > 0 &&
-                parseTimeToMinutesLocal(row.start) === null
+                parseTimeToMinutes(row.start) === null
               ) {
                 startInputs[i]?.focus();
               } else if (
                 row.end.trim().length > 0 &&
-                parseTimeToMinutesLocal(row.end) === null
+                parseTimeToMinutes(row.end) === null
               ) {
                 endInputs[i]?.focus();
               } else {
