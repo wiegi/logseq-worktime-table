@@ -16,6 +16,7 @@ const WORKTIME_TABLE_EDIT_MODEL_FN = "wtEditWorktimeTable";
 
 const SETTINGS_DIALOG_PREFILL_JSON = "dialogPrefillJson";
 const SETTINGS_USE_12_HOUR_CLOCK = "use12HourClock";
+const SETTINGS_DISABLE_TOTAL_ROW_TIME_RANGE = "disableTotalRowTimeRange";
 
 let rendererRegistered = false;
 
@@ -225,6 +226,11 @@ function readUse12HourClockFromSettings(): boolean {
   return Boolean(s?.[SETTINGS_USE_12_HOUR_CLOCK]);
 }
 
+function readDisableTotalRowTimeRangeFromSettings(): boolean {
+  const s = (logseq as any).settings as Record<string, unknown> | undefined;
+  return Boolean(s?.[SETTINGS_DISABLE_TOTAL_ROW_TIME_RANGE]);
+}
+
 function withInlineEditButton(tableMarkdown: string): string {
   return `${WORKTIME_TABLE_RENDERER_MACRO}\n${tableMarkdown}`;
 }
@@ -373,6 +379,7 @@ async function commandWorktime(): Promise<void> {
     const md = withInlineEditButton(
       buildMarkdownTable(calculated, {
         use12HourClock: readUse12HourClockFromSettings(),
+        showTotalRowTimeRange: !readDisableTotalRowTimeRangeFromSettings(),
       }),
     );
     await insertAtCursor(md);
@@ -456,6 +463,7 @@ async function commandEditTable(contextUuid?: string): Promise<void> {
     const md = withInlineEditButton(
       buildMarkdownTable(calculated, {
         use12HourClock: readUse12HourClockFromSettings(),
+        showTotalRowTimeRange: !readDisableTotalRowTimeRangeFromSettings(),
       }),
     );
 
@@ -519,6 +527,7 @@ async function commandExportCsv(contextUuid?: string): Promise<void> {
 
   const csv = buildCsvTable(calculated, {
     use12HourClock: readUse12HourClockFromSettings(),
+    showTotalRowTimeRange: !readDisableTotalRowTimeRangeFromSettings(),
   });
   const filename = await suggestCsvFilenameFromBlock(uuid);
   downloadTextFile(filename, csv);
@@ -530,26 +539,32 @@ function registerCommands(): void {
   const alreadyInit = Boolean(g[INIT_GUARD_KEY]);
   if (!alreadyInit) g[INIT_GUARD_KEY] = true;
 
-  if (!alreadyInit) {
-    logseq.useSettingsSchema([
-      {
-        key: SETTINGS_DIALOG_PREFILL_JSON,
-        type: "string",
-        default: "",
-        title: "Dialog prefill (JSON)",
-        description:
-          'Advanced: JSON object to prefill the dialog, e.g. {"rows":[{"start":"08:00","end":"","task":""}],"offsets":[{"hours":1,"task":"Break"}]}',
-      },
-      {
-        key: SETTINGS_USE_12_HOUR_CLOCK,
-        type: "boolean",
-        default: false,
-        title: "Use 12-hour clock (AM/PM)",
-        description:
-          "If enabled, Start/End times are displayed as h:mm AM/PM. Input accepts both 24h and 12h formats.",
-      },
-    ]);
-  }
+  logseq.useSettingsSchema([
+    {
+      key: SETTINGS_DIALOG_PREFILL_JSON,
+      type: "string",
+      default: "",
+      title: "Dialog prefill (JSON)",
+      description:
+        'Advanced: JSON object to prefill the dialog, e.g. {"rows":[{"start":"08:00","end":"","task":""}],"offsets":[{"hours":1,"task":"Break"}]}',
+    },
+    {
+      key: SETTINGS_USE_12_HOUR_CLOCK,
+      type: "boolean",
+      default: false,
+      title: "Use 12-hour clock (AM/PM)",
+      description:
+        "If enabled, Start/End times are displayed as h:mm AM/PM. Input accepts both 24h and 12h formats.",
+    },
+    {
+      key: SETTINGS_DISABLE_TOTAL_ROW_TIME_RANGE,
+      type: "boolean",
+      default: false,
+      title: "Disable Start/End in Total row",
+      description:
+        "If enabled, the Total row hides Start and End and only shows duration totals. If disabled, the Total row shows the earliest visible Start and a derived End computed as earliest Start plus total duration.",
+    },
+  ]);
 
   activateThisInstance();
 

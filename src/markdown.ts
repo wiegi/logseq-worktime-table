@@ -68,6 +68,10 @@ function formatClockCell(value: string, use12HourClock: boolean): string {
     : formatMinutesToClock24(minutes);
 }
 
+function formatBoldCell(value: string): string {
+  return value.length > 0 ? `**${value}**` : "";
+}
+
 export interface OffsetRow {
   task: string;
   minutes: number;
@@ -118,7 +122,10 @@ export function calculateRows(rows: InputRow[]): CalculatedRow[] {
 
 export function buildMarkdownTable(
   calculatedRows: CalculatedRow[],
-  options?: { use12HourClock?: boolean },
+  options?: {
+    use12HourClock?: boolean;
+    showTotalRowTimeRange?: boolean;
+  },
 ): string {
   const header = `${WORKTIME_TABLE_HEADER}\n${WORKTIME_TABLE_SEPARATOR}\n`;
 
@@ -150,31 +157,32 @@ export function buildMarkdownTable(
 
   const totalHHMM = formatMinutesToHHMM(totalMinutes);
   const totalIndustrialStr = totalIndustrial.toFixed(2);
+  const showTotalRowTimeRange = Boolean(options?.showTotalRowTimeRange);
 
   const totalStart =
-    earliestStartMinutes === null
+    !showTotalRowTimeRange || earliestStartMinutes === null
       ? ""
       : Boolean(options?.use12HourClock)
         ? formatMinutesToClock12(earliestStartMinutes)
         : formatMinutesToClock24(earliestStartMinutes);
 
   const totalEnd =
-    earliestStartMinutes === null
+    !showTotalRowTimeRange || earliestStartMinutes === null
       ? ""
       : Boolean(options?.use12HourClock)
         ? formatMinutesToClock12(earliestStartMinutes + totalMinutes)
         : formatMinutesToClock24(earliestStartMinutes + totalMinutes);
 
   const footer =
-    "| **Total** | **" +
-    totalStart +
-    "** | **" +
-    totalEnd +
-    "** | **" +
-    totalHHMM +
-    "** | **" +
-    totalIndustrialStr +
-    "** |\n";
+    "| **Total** | " +
+    formatBoldCell(totalStart) +
+    " | " +
+    formatBoldCell(totalEnd) +
+    " | " +
+    formatBoldCell(totalHHMM) +
+    " | " +
+    formatBoldCell(totalIndustrialStr) +
+    " |\n";
 
   return header + (body ? body + "\n" : "") + footer;
 }
@@ -189,9 +197,13 @@ function escapeCsvCell(value: string): string {
 
 export function buildCsvTable(
   calculatedRows: CalculatedRow[],
-  options?: { use12HourClock?: boolean },
+  options?: {
+    use12HourClock?: boolean;
+    showTotalRowTimeRange?: boolean;
+  },
 ): string {
   const use12HourClock = Boolean(options?.use12HourClock);
+  const showTotalRowTimeRange = Boolean(options?.showTotalRowTimeRange);
 
   let totalMinutes = 0;
   let totalIndustrial = 0;
@@ -232,14 +244,14 @@ export function buildCsvTable(
   const totalIndustrialStr = totalIndustrial.toFixed(2);
 
   const totalStart =
-    earliestStartMinutes === null
+    !showTotalRowTimeRange || earliestStartMinutes === null
       ? ""
       : use12HourClock
         ? formatMinutesToClock12(earliestStartMinutes)
         : formatMinutesToClock24(earliestStartMinutes);
 
   const totalEnd =
-    earliestStartMinutes === null
+    !showTotalRowTimeRange || earliestStartMinutes === null
       ? ""
       : use12HourClock
         ? formatMinutesToClock12(earliestStartMinutes + totalMinutes)
