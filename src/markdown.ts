@@ -2,42 +2,9 @@ import {
   formatIndustrialHours,
   formatMinutesToHHMM,
   getDurationMinutes,
+  parseTimeToMinutes,
   type InputRow,
 } from "./time";
-
-const TIME_24H_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
-const TIME_12H_RE = /^(0?[1-9]|1[0-2]):([0-5]\d)\s*([AaPp][Mm])$/;
-
-function parseTimeToMinutesLocal(value: string): number | null {
-  const trimmed = value.trim();
-
-  {
-    const match = TIME_24H_RE.exec(trimmed);
-    if (match) {
-      const hours = Number(match[1]);
-      const minutes = Number(match[2]);
-      if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return null;
-      return hours * 60 + minutes;
-    }
-  }
-
-  {
-    const match = TIME_12H_RE.exec(trimmed);
-    if (match) {
-      const hours12 = Number(match[1]);
-      const minutes = Number(match[2]);
-      const ampm = String(match[3]).toLowerCase();
-      if (!Number.isInteger(hours12) || !Number.isInteger(minutes)) return null;
-      if (hours12 < 1 || hours12 > 12) return null;
-      const isPm = ampm === "pm";
-      const baseHours = hours12 % 12;
-      const hours24 = isPm ? baseHours + 12 : baseHours;
-      return hours24 * 60 + minutes;
-    }
-  }
-
-  return null;
-}
 
 function formatMinutesToClock24(totalMinutes: number): string {
   const safe = Math.floor(totalMinutes);
@@ -61,7 +28,7 @@ function formatMinutesToClock12(totalMinutes: number): string {
 }
 
 function formatClockCell(value: string, use12HourClock: boolean): string {
-  const minutes = parseTimeToMinutesLocal(value);
+  const minutes = parseTimeToMinutes(value);
   if (minutes === null) return value;
   return use12HourClock
     ? formatMinutesToClock12(minutes)
@@ -140,7 +107,7 @@ export function buildMarkdownTable(
         totalIndustrial += r.durationMinutes / 60;
       }
 
-      const startMin = parseTimeToMinutesLocal(r.start);
+      const startMin = parseTimeToMinutes(r.start);
       if (startMin !== null) {
         earliestStartMinutes =
           earliestStartMinutes === null
@@ -218,7 +185,7 @@ export function buildCsvTable(
       totalIndustrial += r.durationMinutes / 60;
     }
 
-    const startMin = parseTimeToMinutesLocal(r.start);
+    const startMin = parseTimeToMinutes(r.start);
     if (startMin !== null) {
       earliestStartMinutes =
         earliestStartMinutes === null
