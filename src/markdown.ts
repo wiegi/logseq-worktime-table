@@ -2,6 +2,7 @@ import {
   formatIndustrialHours,
   formatMinutesToHHMM,
   getDurationMinutes,
+  parseOffsetHours,
   parseTimeToMinutes,
   type InputRow,
 } from "./time";
@@ -35,21 +36,28 @@ function formatClockCell(value: string, use12HourClock: boolean): string {
     : formatMinutesToClock24(minutes);
 }
 
-function formatBoldCell(value: string): string {
-  return value.length > 0 ? `**${value}**` : "";
+function formatClockCellOrPlaceholder(
+  value: string,
+  use12HourClock: boolean,
+): string {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return EMPTY_TIME_PLACEHOLDER;
+  return formatClockCell(trimmed, use12HourClock);
 }
 
-export interface OffsetRow {
-  task: string;
-  minutes: number;
+function formatBoldCell(value: string): string {
+  return value.length > 0 ? `**${value}**` : "";
 }
 
 export const WORKTIME_TABLE_HEADER =
   "| Task | Start | End | Duration | Duration (dec.) |";
 export const WORKTIME_TABLE_SEPARATOR = "|---|---:|---:|---:|---:|";
 export const WORKTIME_TABLE_SUM_LABEL = "Total";
+const EMPTY_TIME_PLACEHOLDER = "--:--";
+const OFFSET_ROW_MARKER = "<!--wt:offset-->";
 
 export interface CalculatedRow {
+  kind?: "subtotal" | "offset";
   task: string;
   start: string;
   end: string;
@@ -61,12 +69,37 @@ export interface CalculatedRow {
 export function calculateRows(rows: InputRow[]): CalculatedRow[] {
   const calculated: CalculatedRow[] = [];
   for (const row of rows) {
+    if (row.kind === "subtotal") {
+      calculated.push({
+        kind: "subtotal",
+        task: row.task.trim().length > 0 ? row.task.trim() : "Subtotal",
+        start: "",
+        end: "",
+        durationMinutes: null,
+        durationHHMM: "",
+        industrialHours: "",
+      });
+      continue;
+    }
+
+    if (row.kind === "offset") {
+      const hours = parseOffsetHours(row.start);
+      const minutes = hours === null ? null : Math.round(hours * 60);
+      calculated.push({
+        kind: "offset",
+        task: row.task.trim(),
+        start: "",
+        end: "",
+        durationMinutes: minutes,
+        durationHHMM: minutes === null ? "" : formatMinutesToHHMM(minutes),
+        industrialHours: minutes === null ? "" : formatIndustrialHours(minutes),
+      });
+      continue;
+    }
+
     const start = row.start.trim();
     const end = row.end.trim();
-    const taskTrimmed = row.task.trim();
-    const isFullyEmpty =
-      taskTrimmed.length === 0 && start.length === 0 && end.length === 0;
-    const task = isFullyEmpty ? "" : taskTrimmed.length > 0 ? taskTrimmed : "-";
+    const task = row.task.trim();
 
     const durationMinutes =
       start.length > 0 && end.length > 0
@@ -87,6 +120,124 @@ export function calculateRows(rows: InputRow[]): CalculatedRow[] {
   return calculated;
 }
 
+function formatSummaryRowMarkdown(
+  label: string,
+  minutes: number,
+  earliestStartMinutes: number | null,
+  use12HourClock: boolean,
+  showTimeRange: boolean,
+): string {
+  const startCell = showTimeRange
+    ? earliestStartMinutes !== null
+      ? use12HourClock
+        ? formatMinutesToClock12(earliestStartMinutes)
+        : formatMinutesToClock24(earliestStartMinutes)
+      : EMPTY_TIME_PLACEHOLDER
+    : "";
+
+  const endCell = showTimeRange
+    ? earliestStartMinutes !== null
+      ? use12HourClock
+        ? formatMinutesToClock12(earliestStartMinutes + minutes)
+        : formatMinutesToClock24(earliestStartMinutes + minutes)
+      : EMPTY_TIME_PLACEHOLDER
+    : "";
+
+  return (
+    "| **" +
+    escapeCell(label) +
+    "** | " +
+    formatBoldCell(startCell) +
+    " | " +
+    formatBoldCell(endCell) +
+    " | " +
+    formatBoldCell(formatMinutesToHHMM(minutes)) +
+    " | " +
+    formatBoldCell(formatIndustrialHours(minutes)) +
+    " |"
+  );
+}
+
+function formatSummaryRowCsv(
+  label: string,
+  minutes: number,
+  earliestStartMinutes: number | null,
+  use12HourClock: boolean,
+  showTimeRange: boolean,
+): string[] {
+  const startCell =
+    showTimeRange && earliestStartMinutes !== null
+      ? use12HourClock
+        ? formatMinutesToClock12(earliestStartMinutes)
+        : formatMinutesToClock24(earliestStartMinutes)
+      : "";
+
+  const endCell =
+    showTimeRange && earliestStartMinutes !== null
+      ? use12HourClock
+        ? formatMinutesToClock12(earliestStartMinutes + minutes)
+        : formatMinutesToClock24(earliestStartMinutes + minutes)
+      : "";
+
+  return [
+    escapeCsvCell(label),
+    escapeCsvCell(startCell),
+    escapeCsvCell(endCell),
+    escapeCsvCell(formatMinutesToHHMM(minutes)),
+    escapeCsvCell(formatIndustrialHours(minutes)),
+  ];
+}
+
+function formatTaskCellMarkdown(task: string, isOffset = false): string {
+  const escaped = escapeCell(task);
+  return isOffset ? `${OFFSET_ROW_MARKER}${escaped}` : escaped;
+}
+
+function formatRowTaskMarkdown(row: CalculatedRow): string {
+  if (row.kind === "offset") {
+    return formatTaskCellMarkdown(row.task, true);
+  }
+
+  return formatTaskCellMarkdown(row.task);
+}
+
+function stripLegacyTaskIndent(value: string): string {
+  return value.replace(/^(?:&nbsp;|\u00a0|\s)+/gi, "");
+}
+
+function hasOffsetRowMarker(value: string): boolean {
+  return value.includes(OFFSET_ROW_MARKER);
+}
+
+function stripOffsetRowMarker(value: string): string {
+  return value.split(OFFSET_ROW_MARKER).join("").trim();
+}
+
+function stripHtmlTags(value: string): string {
+  return value.replace(/<[^>]+>/g, "").trim();
+}
+
+function normalizeParsedCell(
+  value: string,
+  options?: { stripIndent?: boolean; stripOffsetMarker?: boolean },
+): string {
+  let result = unescapeCell(value ?? "");
+  if (options?.stripOffsetMarker) {
+    result = stripOffsetRowMarker(result);
+  }
+  if (options?.stripIndent) {
+    result = stripLegacyTaskIndent(result);
+  }
+  result = stripBold(result);
+  return result.trim();
+}
+
+function normalizeParsedTimeCell(value: string): string {
+  const result = normalizeParsedCell(value);
+  const plain = stripHtmlTags(result);
+  return plain === EMPTY_TIME_PLACEHOLDER || plain === "—:—" ? "" : result;
+}
+
 export function buildMarkdownTable(
   calculatedRows: CalculatedRow[],
   options?: {
@@ -95,16 +246,32 @@ export function buildMarkdownTable(
   },
 ): string {
   const header = `${WORKTIME_TABLE_HEADER}\n${WORKTIME_TABLE_SEPARATOR}\n`;
+  const use12HourClock = Boolean(options?.use12HourClock);
+  const showTotalRowTimeRange = Boolean(options?.showTotalRowTimeRange);
 
   let totalMinutes = 0;
-  let totalIndustrial = 0;
   let earliestStartMinutes: number | null = null;
+  let sectionMinutes = 0;
+  let sectionStartMinutes: number | null = null;
 
   const body = calculatedRows
     .map((r) => {
+      if (r.kind === "subtotal") {
+        const subtotalRow = formatSummaryRowMarkdown(
+          r.task.trim().length > 0 ? r.task.trim() : "Subtotal",
+          sectionMinutes,
+          sectionStartMinutes,
+          use12HourClock,
+          showTotalRowTimeRange,
+        );
+        sectionMinutes = 0;
+        sectionStartMinutes = null;
+        return subtotalRow;
+      }
+
       if (typeof r.durationMinutes === "number") {
         totalMinutes += r.durationMinutes;
-        totalIndustrial += r.durationMinutes / 60;
+        sectionMinutes += r.durationMinutes;
       }
 
       const startMin = parseTimeToMinutes(r.start);
@@ -113,43 +280,32 @@ export function buildMarkdownTable(
           earliestStartMinutes === null
             ? startMin
             : Math.min(earliestStartMinutes, startMin);
+        sectionStartMinutes =
+          sectionStartMinutes === null
+            ? startMin
+            : Math.min(sectionStartMinutes, startMin);
       }
 
-      const use12HourClock = Boolean(options?.use12HourClock);
-      const startCell = formatClockCell(r.start, use12HourClock);
-      const endCell = formatClockCell(r.end, use12HourClock);
-      return `| ${escapeCell(r.task)} | ${startCell} | ${endCell} | ${r.durationHHMM} | ${r.industrialHours} |`;
+      const startCell =
+        r.kind === "offset"
+          ? ""
+          : formatClockCellOrPlaceholder(r.start, use12HourClock);
+      const endCell =
+        r.kind === "offset"
+          ? ""
+          : formatClockCellOrPlaceholder(r.end, use12HourClock);
+      return `| ${formatRowTaskMarkdown(r)} | ${startCell} | ${endCell} | ${r.durationHHMM} | ${r.industrialHours} |`;
     })
     .join("\n");
 
-  const totalHHMM = formatMinutesToHHMM(totalMinutes);
-  const totalIndustrialStr = totalIndustrial.toFixed(2);
-  const showTotalRowTimeRange = Boolean(options?.showTotalRowTimeRange);
-
-  const totalStart =
-    !showTotalRowTimeRange || earliestStartMinutes === null
-      ? ""
-      : Boolean(options?.use12HourClock)
-        ? formatMinutesToClock12(earliestStartMinutes)
-        : formatMinutesToClock24(earliestStartMinutes);
-
-  const totalEnd =
-    !showTotalRowTimeRange || earliestStartMinutes === null
-      ? ""
-      : Boolean(options?.use12HourClock)
-        ? formatMinutesToClock12(earliestStartMinutes + totalMinutes)
-        : formatMinutesToClock24(earliestStartMinutes + totalMinutes);
-
   const footer =
-    "| **Total** | " +
-    formatBoldCell(totalStart) +
-    " | " +
-    formatBoldCell(totalEnd) +
-    " | " +
-    formatBoldCell(totalHHMM) +
-    " | " +
-    formatBoldCell(totalIndustrialStr) +
-    " |\n";
+    formatSummaryRowMarkdown(
+      WORKTIME_TABLE_SUM_LABEL,
+      totalMinutes,
+      earliestStartMinutes,
+      use12HourClock,
+      showTotalRowTimeRange,
+    ) + "\n";
 
   return header + (body ? body + "\n" : "") + footer;
 }
@@ -173,16 +329,32 @@ export function buildCsvTable(
   const showTotalRowTimeRange = Boolean(options?.showTotalRowTimeRange);
 
   let totalMinutes = 0;
-  let totalIndustrial = 0;
   let earliestStartMinutes: number | null = null;
+  let sectionMinutes = 0;
+  let sectionStartMinutes: number | null = null;
 
   const lines: string[] = [];
   lines.push("Task,Start,End,Duration,Duration (dec.)");
 
   for (const r of calculatedRows) {
+    if (r.kind === "subtotal") {
+      lines.push(
+        formatSummaryRowCsv(
+          r.task.trim().length > 0 ? r.task.trim() : "Subtotal",
+          sectionMinutes,
+          sectionStartMinutes,
+          use12HourClock,
+          showTotalRowTimeRange,
+        ).join(","),
+      );
+      sectionMinutes = 0;
+      sectionStartMinutes = null;
+      continue;
+    }
+
     if (typeof r.durationMinutes === "number") {
       totalMinutes += r.durationMinutes;
-      totalIndustrial += r.durationMinutes / 60;
+      sectionMinutes += r.durationMinutes;
     }
 
     const startMin = parseTimeToMinutes(r.start);
@@ -191,6 +363,10 @@ export function buildCsvTable(
         earliestStartMinutes === null
           ? startMin
           : Math.min(earliestStartMinutes, startMin);
+      sectionStartMinutes =
+        sectionStartMinutes === null
+          ? startMin
+          : Math.min(sectionStartMinutes, startMin);
     }
 
     const startCell = formatClockCell(r.start, use12HourClock);
@@ -207,31 +383,14 @@ export function buildCsvTable(
     );
   }
 
-  const totalHHMM = formatMinutesToHHMM(totalMinutes);
-  const totalIndustrialStr = totalIndustrial.toFixed(2);
-
-  const totalStart =
-    !showTotalRowTimeRange || earliestStartMinutes === null
-      ? ""
-      : use12HourClock
-        ? formatMinutesToClock12(earliestStartMinutes)
-        : formatMinutesToClock24(earliestStartMinutes);
-
-  const totalEnd =
-    !showTotalRowTimeRange || earliestStartMinutes === null
-      ? ""
-      : use12HourClock
-        ? formatMinutesToClock12(earliestStartMinutes + totalMinutes)
-        : formatMinutesToClock24(earliestStartMinutes + totalMinutes);
-
   lines.push(
-    [
-      escapeCsvCell(WORKTIME_TABLE_SUM_LABEL),
-      escapeCsvCell(totalStart),
-      escapeCsvCell(totalEnd),
-      escapeCsvCell(totalHHMM),
-      escapeCsvCell(totalIndustrialStr),
-    ].join(","),
+    formatSummaryRowCsv(
+      WORKTIME_TABLE_SUM_LABEL,
+      totalMinutes,
+      earliestStartMinutes,
+      use12HourClock,
+      showTotalRowTimeRange,
+    ).join(","),
   );
 
   return lines.join("\r\n") + "\r\n";
@@ -283,6 +442,8 @@ function isTotalRow(cells: string[]): boolean {
     .trim()
     .toLowerCase();
   if (first === WORKTIME_TABLE_SUM_LABEL.toLowerCase()) return true;
+  if (first.length > 0) return false;
+
   const start = (cells[1] ?? "").trim();
   const end = (cells[2] ?? "").trim();
   if (start.length > 0 || end.length > 0) return false;
@@ -291,8 +452,28 @@ function isTotalRow(cells: string[]): boolean {
   return rest.includes("**");
 }
 
+function isSubtotalRow(cells: string[]): boolean {
+  const first = stripBold(cells[0] ?? "")
+    .trim()
+    .toLowerCase();
+  if (first.length === 0 || first === WORKTIME_TABLE_SUM_LABEL.toLowerCase()) {
+    return false;
+  }
+
+  const durCell = (cells[3] ?? "").trim();
+  const indCell = (cells[4] ?? "").trim();
+  const isBoldSummary =
+    /^\*\*.*\*\*$/.test(durCell) || /^\*\*.*\*\*$/.test(indCell);
+  if (!isBoldSummary) return false;
+
+  return (
+    parseSignedHHMM(stripBold(durCell)) !== null ||
+    parseNumber(stripBold(indCell)) !== null
+  );
+}
+
 export type ParseTableResult =
-  | { ok: true; rows: InputRow[]; offsets: OffsetRow[] }
+  | { ok: true; rows: InputRow[] }
   | { ok: false; message: string };
 
 function parseSignedHHMM(value: string): number | null {
@@ -360,7 +541,6 @@ export function parseWorktimeTableFromMarkdown(
   }
 
   const rows: InputRow[] = [];
-  const offsets: OffsetRow[] = [];
   for (let i = headerIndex + 2; i < lines.length; i++) {
     const line = (lines[i] ?? "").trim();
     if (line.length === 0) break;
@@ -370,15 +550,30 @@ export function parseWorktimeTableFromMarkdown(
     if (!cells) continue;
     if (cells.length < 3) continue;
 
-    const cellTask = unescapeCell(cells[0] ?? "");
-    const cellStart = (cells[1] ?? "").trim();
-    const cellEnd = (cells[2] ?? "").trim();
+    const rawTaskCell = unescapeCell(cells[0] ?? "");
+    const hasOffsetMarker = hasOffsetRowMarker(rawTaskCell);
+    const cellTask = normalizeParsedCell(cells[0] ?? "", {
+      stripIndent: true,
+      stripOffsetMarker: true,
+    });
+    const cellStart = normalizeParsedTimeCell(cells[1] ?? "");
+    const cellEnd = normalizeParsedTimeCell(cells[2] ?? "");
+
+    if (isSubtotalRow(cells)) {
+      rows.push({
+        kind: "subtotal",
+        task: cellTask.trim() || "Subtotal",
+        start: "",
+        end: "",
+      });
+      continue;
+    }
 
     if (isTotalRow(cells)) break;
 
     if (cellStart.length === 0 && cellEnd.length === 0) {
-      const durCell = (cells[3] ?? "").trim();
-      const indCell = (cells[4] ?? "").trim();
+      const durCell = normalizeParsedCell(cells[3] ?? "");
+      const indCell = normalizeParsedCell(cells[4] ?? "");
 
       const minutesFromHHMM = parseSignedHHMM(durCell);
       const industrial = parseNumber(indCell);
@@ -386,10 +581,17 @@ export function parseWorktimeTableFromMarkdown(
         industrial === null ? null : Math.round(industrial * 60);
 
       const minutes = minutesFromHHMM ?? minutesFromIndustrial;
-      if (minutes !== null) {
-        offsets.push({
+      if (minutes !== null || hasOffsetMarker) {
+        rows.push({
+          kind: "offset",
           task: cellTask === "-" ? "" : cellTask,
-          minutes,
+          start:
+            industrial !== null
+              ? String(industrial)
+              : minutes !== null
+                ? (minutes / 60).toFixed(2)
+                : "",
+          end: "",
         });
         continue;
       }
@@ -409,5 +611,5 @@ export function parseWorktimeTableFromMarkdown(
     }
   }
 
-  return { ok: true, rows, offsets };
+  return { ok: true, rows };
 }

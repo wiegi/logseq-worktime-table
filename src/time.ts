@@ -1,4 +1,5 @@
 export type ValidationResult = { ok: true } | { ok: false; message: string };
+export type InputRowKind = "work" | "subtotal" | "offset";
 
 const TIME_24H_RE = /^(0?\d|1\d|2[0-3]):([0-5]\d)$/;
 const TIME_12H_RE = /^(0?[1-9]|1[0-2]):([0-5]\d)\s*([AaPp][Mm])$/;
@@ -50,6 +51,13 @@ export function formatIndustrialHours(totalMinutes: number): string {
   return hours.toFixed(2);
 }
 
+export function parseOffsetHours(value: string): number | null {
+  const trimmed = value.trim().replace(",", ".");
+  if (trimmed.length === 0) return null;
+  const hours = Number(trimmed);
+  return Number.isFinite(hours) ? hours : null;
+}
+
 export function getDurationMinutes(start: string, end: string): number | null {
   const startMin = parseTimeToMinutes(start);
   if (startMin === null) return null;
@@ -63,9 +71,27 @@ export interface InputRow {
   task: string;
   start: string;
   end: string;
+  kind?: InputRowKind;
 }
 
 export function validateRow(row: InputRow): ValidationResult {
+  if (row.kind === "subtotal") return { ok: true };
+  if (row.kind === "offset") {
+    const task = row.task.trim();
+    const hoursRaw = row.start.trim();
+    const allEmpty = task.length === 0 && hoursRaw.length === 0;
+    if (allEmpty) return { ok: true };
+
+    if (hoursRaw.length > 0 && parseOffsetHours(hoursRaw) === null) {
+      return {
+        ok: false,
+        message: "Offset hours must be a number such as -0.5 or 1.25.",
+      };
+    }
+
+    return { ok: true };
+  }
+
   const task = row.task.trim();
   const start = row.start.trim();
   const end = row.end.trim();
@@ -100,6 +126,11 @@ export function validateRow(row: InputRow): ValidationResult {
 }
 
 export function isRowEmpty(row: InputRow): boolean {
+  if (row.kind === "subtotal") return false;
+  if (row.kind === "offset") {
+    return row.task.trim().length === 0 && row.start.trim().length === 0;
+  }
+
   return (
     row.task.trim().length === 0 &&
     row.start.trim().length === 0 &&

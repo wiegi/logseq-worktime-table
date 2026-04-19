@@ -1,7 +1,6 @@
 import "@logseq/libs";
 
 import type { InputRow } from "./time";
-import type { OffsetPreset } from "./modal";
 
 const SLASH_COMMAND_WORKTIME = "Worktime Table: Create table";
 const EDIT_COMMAND_LABEL = "Worktime Table: Edit";
@@ -20,6 +19,11 @@ const SETTINGS_DISABLE_TOTAL_ROW_TIME_RANGE = "disableTotalRowTimeRange";
 
 let rendererRegistered = false;
 
+type LegacyOffsetPrefill = {
+  hours: number;
+  task: string;
+};
+
 type TopGuard = {
   activeToken: string;
   handlers?: {
@@ -27,6 +31,7 @@ type TopGuard = {
     edit?: (uuid?: string) => Promise<void>;
     exportCsv?: (uuid?: string) => Promise<void>;
   };
+  worktimeInProgress?: boolean;
   contextMenuRegistered?: boolean;
   contextMenuExportRegistered?: boolean;
 };
@@ -58,6 +63,12 @@ function isActiveInstance(): boolean {
 function activateThisInstance(): void {
   const guard = getTopGuard();
   if (!guard) return;
+
+  if (guard.activeToken && guard.activeToken !== instanceToken) {
+    guard.contextMenuRegistered = false;
+    guard.contextMenuExportRegistered = false;
+  }
+
   guard.activeToken = instanceToken;
 }
 
@@ -144,15 +155,39 @@ function showMsg(
   void logseq.UI.showMsg(message, type);
 }
 
+function sanitizeRowText(
+  value: string,
+  options?: { stripLeadingWhitespace?: boolean },
+): string {
+  const sanitized = String(value ?? "").replace(/<!--wt:offset-->/g, "");
+
+  return options?.stripLeadingWhitespace
+    ? sanitized.trimStart()
+    : sanitized.trim();
+}
+
 function normalizeRows(rows: InputRow[]): InputRow[] {
   return rows.map((r) => ({
-    task: r.task ?? "",
-    start: r.start ?? "",
-    end: r.end ?? "",
+    task: sanitizeRowText(r.task ?? "", { stripLeadingWhitespace: true }),
+    start: sanitizeRowText(r.start ?? ""),
+    end: sanitizeRowText(r.end ?? ""),
+    ...(r.kind === "subtotal"
+      ? { kind: "subtotal" as const }
+      : r.kind === "offset"
+        ? { kind: "offset" as const }
+        : {}),
   }));
 }
 
 function isFullyEmptyRow(row: InputRow): boolean {
+  if (row.kind === "subtotal") return false;
+  if (row.kind === "offset") {
+    return (
+      (row.task ?? "").trim().length === 0 &&
+      (row.start ?? "").trim().length === 0
+    );
+  }
+
   return (
     (row.task ?? "").trim().length === 0 &&
     (row.start ?? "").trim().length === 0 &&
@@ -160,23 +195,32 @@ function isFullyEmptyRow(row: InputRow): boolean {
   );
 }
 
-function trimOuterEmptyRows(rows: InputRow[]): InputRow[] {
-  let startIndex = 0;
-  let endIndex = rows.length;
+function dropFullyEmptyRows(rows: InputRow[]): InputRow[] {
+  return rows.filter((row) => !isFullyEmptyRow(row));
+}
 
-  while (startIndex < endIndex && isFullyEmptyRow(rows[startIndex]!)) {
-    startIndex++;
-  }
-  while (endIndex > startIndex && isFullyEmptyRow(rows[endIndex - 1]!)) {
-    endIndex--;
-  }
+function mergeLegacyOffsetsIntoRows(
+  rows: InputRow[],
+  offsets?: LegacyOffsetPrefill[],
+): InputRow[] {
+  if (!offsets || offsets.length === 0) return rows;
 
-  return rows.slice(startIndex, endIndex);
+  return rows.concat(
+    offsets.map((offset) => ({
+      kind: "offset" as const,
+      task: offset.task ?? "",
+      start:
+        typeof offset.hours === "number" && Number.isFinite(offset.hours)
+          ? String(offset.hours)
+          : "",
+      end: "",
+    })),
+  );
 }
 
 type DialogPrefill = {
   rows?: InputRow[];
-  offsets?: OffsetPreset[];
+  offsets?: LegacyOffsetPrefill[];
 };
 
 function readDialogPrefillFromSettings(): DialogPrefill {
@@ -197,11 +241,16 @@ function readDialogPrefillFromSettings(): DialogPrefill {
         task: typeof r?.task === "string" ? r.task : "",
         start: typeof r?.start === "string" ? r.start : "",
         end: typeof r?.end === "string" ? r.end : "",
+        ...(r?.kind === "subtotal"
+          ? { kind: "subtotal" as const }
+          : r?.kind === "offset"
+            ? { kind: "offset" as const }
+            : {}),
       }));
     }
 
     if (Array.isArray(parsed?.offsets)) {
-      const offsets: OffsetPreset[] = parsed.offsets
+      const offsets: LegacyOffsetPrefill[] = parsed.offsets
         .map((o: any) => ({
           hours:
             typeof o?.hours === "number"
@@ -211,7 +260,7 @@ function readDialogPrefillFromSettings(): DialogPrefill {
                 : 0,
           task: typeof o?.task === "string" ? o.task : "",
         }))
-        .filter((o: OffsetPreset) => Number.isFinite(o.hours));
+        .filter((o: LegacyOffsetPrefill) => Number.isFinite(o.hours));
       result.offsets = offsets;
     }
 
@@ -327,16 +376,20 @@ async function commandWorktime(): Promise<void> {
     await delegateToActiveInstance("worktime");
     return;
   }
+
+  const guard = getTopGuard();
+  if (guard?.worktimeInProgress) return;
+  if (guard) guard.worktimeInProgress = true;
+
   const { getModalController } = await import("./modal");
   const { calculateRows, buildMarkdownTable } = await import("./markdown");
-  const { formatIndustrialHours, formatMinutesToHHMM } = await import("./time");
 
   const modal = getModalController();
 
   logseq.showMainUI({ autoFocus: true });
   try {
     const prefill = readDialogPrefillFromSettings();
-    const initialRows: InputRow[] =
+    const initialRows = mergeLegacyOffsetsIntoRows(
       prefill.rows && prefill.rows.length > 0
         ? prefill.rows
         : [
@@ -345,36 +398,15 @@ async function commandWorktime(): Promise<void> {
               start: "",
               end: "",
             },
-          ];
+          ],
+      prefill.offsets,
+    );
 
-    const openOptions = {
-      initialRows,
-      ...(prefill.offsets && prefill.offsets.length > 0
-        ? { initialOffsets: prefill.offsets }
-        : {}),
-    };
-
-    const result = await modal.open(openOptions);
+    const result = await modal.open({ initialRows });
     if (!result) return;
 
-    const rows = trimOuterEmptyRows(normalizeRows(result.rows));
-    const offsets = result.offsets;
-
+    const rows = dropFullyEmptyRows(normalizeRows(result.rows));
     const calculated = calculateRows(rows);
-
-    for (const o of offsets) {
-      const minutes = Math.round((o.hours ?? 0) * 60);
-      if (!Number.isFinite(minutes) || minutes === 0) continue;
-      const task = o.task.trim().length > 0 ? o.task.trim() : "-";
-      calculated.push({
-        task,
-        start: "",
-        end: "",
-        durationMinutes: minutes,
-        durationHHMM: formatMinutesToHHMM(minutes),
-        industrialHours: formatIndustrialHours(minutes),
-      });
-    }
 
     const md = withInlineEditButton(
       buildMarkdownTable(calculated, {
@@ -388,6 +420,10 @@ async function commandWorktime(): Promise<void> {
     const msg = e instanceof Error ? e.message : "Unknown error.";
     showMsg(msg, "error");
   } finally {
+    const currentGuard = getTopGuard();
+    if (currentGuard?.activeToken === instanceToken) {
+      currentGuard.worktimeInProgress = false;
+    }
     logseq.hideMainUI({ restoreEditingCursor: true });
   }
 }
@@ -400,7 +436,6 @@ async function commandEditTable(contextUuid?: string): Promise<void> {
   const { getModalController } = await import("./modal");
   const { calculateRows, buildMarkdownTable, parseWorktimeTableFromMarkdown } =
     await import("./markdown");
-  const { formatIndustrialHours, formatMinutesToHHMM } = await import("./time");
 
   let uuid: string;
   let content: string;
@@ -427,39 +462,14 @@ async function commandEditTable(contextUuid?: string): Promise<void> {
 
   logseq.showMainUI({ autoFocus: true });
   try {
-    const parsedOffsets = parsed.offsets ?? [];
-
-    const initialOffsets: OffsetPreset[] =
-      parsedOffsets.length > 0
-        ? parsedOffsets.map((o) => ({
-            hours: Math.round((o.minutes / 60) * 100) / 100,
-            task: o.task,
-          }))
-        : [];
-
     const result = await modal.open({
       initialRows: parsed.rows,
-      initialOffsets,
     });
     if (!result) return;
 
-    const rows = trimOuterEmptyRows(normalizeRows(result.rows));
-    const offsets = result.offsets;
+    const rows = dropFullyEmptyRows(normalizeRows(result.rows));
     const calculated = calculateRows(rows);
 
-    for (const o of offsets) {
-      const minutes = Math.round((o.hours ?? 0) * 60);
-      if (!Number.isFinite(minutes) || minutes === 0) continue;
-      const task = o.task.trim().length > 0 ? o.task.trim() : "-";
-      calculated.push({
-        task,
-        start: "",
-        end: "",
-        durationMinutes: minutes,
-        durationHHMM: formatMinutesToHHMM(minutes),
-        industrialHours: formatIndustrialHours(minutes),
-      });
-    }
     const md = withInlineEditButton(
       buildMarkdownTable(calculated, {
         use12HourClock: readUse12HourClockFromSettings(),
@@ -485,7 +495,6 @@ async function commandExportCsv(contextUuid?: string): Promise<void> {
 
   const { calculateRows, buildCsvTable, parseWorktimeTableFromMarkdown } =
     await import("./markdown");
-  const { formatIndustrialHours, formatMinutesToHHMM } = await import("./time");
 
   let uuid: string;
   let content: string;
@@ -510,20 +519,6 @@ async function commandExportCsv(contextUuid?: string): Promise<void> {
 
   const rows = normalizeRows(parsed.rows);
   const calculated = calculateRows(rows);
-
-  for (const o of parsed.offsets ?? []) {
-    const minutes = Math.round(o.minutes ?? 0);
-    if (!Number.isFinite(minutes) || minutes === 0) continue;
-    const task = o.task.trim().length > 0 ? o.task.trim() : "-";
-    calculated.push({
-      task,
-      start: "",
-      end: "",
-      durationMinutes: minutes,
-      durationHHMM: formatMinutesToHHMM(minutes),
-      industrialHours: formatIndustrialHours(minutes),
-    });
-  }
 
   const csv = buildCsvTable(calculated, {
     use12HourClock: readUse12HourClockFromSettings(),
@@ -582,6 +577,7 @@ function registerCommands(): void {
     const guard = getTopGuard();
     if (guard?.activeToken === instanceToken) {
       guard.activeToken = "";
+      guard.worktimeInProgress = false;
       guard.contextMenuRegistered = false;
       guard.contextMenuExportRegistered = false;
       if (guard.handlers) {
