@@ -8,14 +8,17 @@
     "clean": "node scripts/clean.mjs",
     "build": "node scripts/clean.mjs && parcel build --public-url ./ --no-source-maps index.html",
     "pack": "node scripts/clean.mjs && node scripts/pack.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "devDependencies": {
     "@logseq/libs": "^0.2.12",
     "@parcel/compressor-raw": "^2.16.4",
     "@parcel/transformer-inline-string": "^2.16.4",
     "parcel": "^2.16.4",
-    "typescript": "^5.5.4"
+    "typescript": "^5.5.4",
+    "vitest": "^3.2.4"
   },
   "overrides": {
     "dompurify": "3.3.3",
