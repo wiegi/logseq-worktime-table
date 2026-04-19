@@ -563,6 +563,16 @@ function registerCommands(): void {
 
   activateThisInstance();
 
+  (logseq as any).setMainUIInlineStyle?.({
+    display: "none",
+    background: "transparent",
+    pointerEvents: "none",
+  });
+
+  try {
+    logseq.hideMainUI();
+  } catch {}
+
   {
     const guard = getTopGuard();
     if (guard) {

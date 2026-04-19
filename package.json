@@ -13,6 +13,7 @@
   "devDependencies": {
     "@logseq/libs": "^0.2.12",
     "@parcel/compressor-raw": "^2.16.4",
+    "@parcel/transformer-inline-string": "^2.16.4",
     "parcel": "^2.16.4",
     "typescript": "^5.5.4"
   },

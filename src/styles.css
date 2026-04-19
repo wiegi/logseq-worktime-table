@@ -1,9 +1,5 @@
-:root {
-  color-scheme: light dark;
-}
-
-body {
-  margin: 0;
+#wt-overlay,
+#wt-modal {
   font-family:
     system-ui,
     -apple-system,

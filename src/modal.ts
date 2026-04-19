@@ -1,4 +1,4 @@
-import "./styles.css";
+import * as stylesTextModule from "bundle-text:./styles.css";
 import {
   isRowEmpty,
   parseTimeToMinutes,
@@ -24,8 +24,19 @@ type ModalController = {
 
 let controller: ModalController | null = null;
 
+const stylesText = String(
+  (stylesTextModule as { default?: string }).default ?? stylesTextModule,
+);
+
 export function getModalController(): ModalController {
   if (controller) return controller;
+
+  const overlayHost = document.createElement("div");
+  overlayHost.id = "wt-overlay-host";
+  const shadowRoot = overlayHost.attachShadow({ mode: "open" });
+
+  const style = document.createElement("style");
+  style.textContent = stylesText;
 
   const overlay = document.createElement("div");
   overlay.id = "wt-overlay";
@@ -67,7 +78,8 @@ export function getModalController(): ModalController {
   `;
 
   overlay.appendChild(modal);
-  document.body.appendChild(overlay);
+  shadowRoot.append(style, overlay);
+  document.body.appendChild(overlayHost);
 
   const grid = modal.querySelector<HTMLDivElement>("#wt-grid");
   const form = modal.querySelector<HTMLFormElement>("#wt-form");
@@ -124,90 +136,8 @@ export function getModalController(): ModalController {
       }
     } catch {}
   }
-
-  function guessIsDarkFromColor(value: string): boolean | null {
-    const v = value.trim();
-    if (v.length === 0) return null;
-
-    const m = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(v);
-    if (m) {
-      const r = Number(m[1]);
-      const g = Number(m[2]);
-      const b = Number(m[3]);
-      if (![r, g, b].every((n) => Number.isFinite(n))) return null;
-      const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-      return lum < 128;
-    }
-
-    const h = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(v);
-    if (h) {
-      const hex = (h[1] ?? "").toLowerCase();
-      if (hex.length === 0) return null;
-      const full =
-        hex.length === 3
-          ? hex
-              .split("")
-              .map((c) => c + c)
-              .join("")
-          : hex;
-      const r = parseInt(full.slice(0, 2), 16);
-      const g = parseInt(full.slice(2, 4), 16);
-      const b = parseInt(full.slice(4, 6), 16);
-      if (![r, g, b].every((n) => Number.isFinite(n))) return null;
-      const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-      return lum < 128;
-    }
-
-    return null;
-  }
-
-  async function determineLogseqThemeMode(): Promise<"light" | "dark" | null> {
-    try {
-      const cfg = (await (logseq.App as any)?.getUserConfigs?.()) as any;
-      const preferred =
-        typeof cfg?.preferredThemeMode === "string"
-          ? cfg.preferredThemeMode
-          : typeof cfg?.themeMode === "string"
-            ? cfg.themeMode
-            : null;
-      if (preferred) {
-        const t = String(preferred).toLowerCase();
-        if (t.includes("dark")) return "dark";
-        if (t.includes("light")) return "light";
-      }
-    } catch {}
-
-    try {
-      const topDocEl = window.top?.document?.documentElement;
-      if (topDocEl) {
-        const cls = Array.from(topDocEl.classList).join(" ").toLowerCase();
-        if (/(^|\s)(dark|theme-dark|is-dark)(\s|$)/.test(cls)) return "dark";
-        if (/(^|\s)(light|theme-light|is-light)(\s|$)/.test(cls))
-          return "light";
-
-        const bg =
-          window.top
-            ?.getComputedStyle(topDocEl)
-            .getPropertyValue("--ls-primary-background-color") ?? "";
-        const guess = guessIsDarkFromColor(bg);
-        if (guess === true) return "dark";
-        if (guess === false) return "light";
-      }
-    } catch {}
-
-    return null;
-  }
-
-  async function applyThemeFromLogseq(): Promise<void> {
+  function applyThemeFromLogseq(): void {
     syncThemeCssVarsFromTopWindow();
-    const mode = await determineLogseqThemeMode();
-    if (mode) {
-      overlay.style.colorScheme = mode;
-      overlay.dataset.theme = mode;
-    } else {
-      overlay.style.colorScheme = "light dark";
-      delete overlay.dataset.theme;
-    }
   }
 
   function startThemeObserver(): void {
@@ -217,7 +147,7 @@ export function getModalController(): ModalController {
       if (!topDocEl) return;
       themeObserver = new MutationObserver(() => {
         if (!controller?.isOpen()) return;
-        void applyThemeFromLogseq();
+        applyThemeFromLogseq();
       });
       themeObserver.observe(topDocEl, {
         attributes: true,
@@ -744,7 +674,7 @@ export function getModalController(): ModalController {
     overlay.setAttribute("aria-hidden", open ? "false" : "true");
 
     if (open) {
-      void applyThemeFromLogseq();
+      applyThemeFromLogseq();
       startThemeObserver();
     } else {
       stopThemeObserver();
@@ -823,6 +753,11 @@ export function getModalController(): ModalController {
       currentSubmitHandler = null;
     }
     setOpen(false);
+    (logseq as any).setMainUIInlineStyle?.({
+      display: "none",
+      background: "transparent",
+      pointerEvents: "none",
+    });
     const r = resolvePromise;
     resolvePromise = null;
     if (r) r(result);
@@ -965,9 +900,12 @@ export function getModalController(): ModalController {
       setInputsFromRows(initialRows, use12HourClock);
 
       (logseq as any).setMainUIInlineStyle?.({
+        display: "block",
         position: "fixed",
         inset: "0",
         zIndex: "9999",
+        background: "transparent",
+        pointerEvents: "auto",
       });
 
       setOpen(true);
