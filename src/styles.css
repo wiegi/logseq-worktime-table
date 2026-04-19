@@ -62,18 +62,7 @@ body {
   display: grid;
   grid-template-columns:
     minmax(160px, 220px) minmax(160px, 220px) minmax(240px, 1fr)
-    34px;
-  gap: 8px 10px;
-  align-items: center;
-}
-
-.wt-offsets {
-  margin-top: 10px;
-}
-
-.wt-offset-grid {
-  display: grid;
-  grid-template-columns: minmax(160px, 200px) minmax(240px, 1fr) 34px;
+    28px;
   gap: 8px 10px;
   align-items: center;
 }
@@ -82,29 +71,28 @@ body {
   justify-self: stretch;
 }
 
-.wt-grid .hdr,
-.wt-offset-grid .hdr {
+.wt-grid .hdr {
   font-size: 12px;
   opacity: 0.9;
 }
 
-.wt-grid .wt-hdr-action,
-.wt-offset-grid .wt-hdr-action {
+.wt-grid .wt-hdr-action {
   justify-self: end;
 }
 
 .wt-row-delete {
-  width: 34px;
-  height: 34px;
+  width: auto;
+  height: auto;
   padding: 0;
-  border-radius: 8px;
-  border: 1px solid var(--ls-border-color, rgba(127, 127, 127, 0.25));
-  background: var(--ls-secondary-background-color, #222);
+  border-radius: 6px;
+  border: none;
+  background: transparent;
   color: var(--ls-primary-text-color, #eee);
   cursor: pointer;
   justify-self: end;
   line-height: 1;
   font-size: 18px;
+  opacity: 0.8;
 }
 
 .wt-row-delete:focus {
@@ -152,11 +140,16 @@ body {
   padding: 0 10px;
   border-radius: 8px;
   border: 1px solid var(--ls-border-color, rgba(127, 127, 127, 0.25));
-  background: var(--ls-secondary-background-color, #222);
+  background: color-mix(
+    in srgb,
+    var(--ls-secondary-background-color, #222) 78%,
+    black 22%
+  );
   color: var(--ls-primary-text-color, #eee);
   cursor: pointer;
   font-size: 12px;
   white-space: nowrap;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
 }
 
 .wt-now:focus {
@@ -164,24 +157,99 @@ body {
   outline-offset: 1px;
 }
 
-.wt-offset-grid input[type="text"] {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 6px 8px;
-  height: 34px;
-  border-radius: 8px;
-  border: 1px solid var(--ls-border-color, rgba(127, 127, 127, 0.25));
-  background: var(--ls-secondary-background-color, #222);
-  color: var(--ls-primary-text-color, #eee);
-  min-width: 0;
-}
-
 .wt-grid input[type="text"] {
   min-width: 0;
 }
 
+.wt-task-subtotal {
+  font-weight: 600;
+}
+
+.wt-task-offset {
+  font-style: italic;
+}
+
+.wt-subtotal-input:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
+.wt-time-combo-subtotal {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  opacity: 0.8;
+}
+
+.wt-time-combo-offset {
+  opacity: 0.9;
+}
+
+.wt-time-combo-offset-wide {
+  grid-column: span 2;
+}
+
+.wt-time-combo-offset-hidden {
+  display: none;
+}
+
+.wt-offset-input {
+  font-variant-numeric: tabular-nums;
+}
+
+.wt-row-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0;
+}
+
+.wt-row-drag {
+  width: auto;
+  height: auto;
+  padding: 0;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--ls-primary-text-color, #eee);
+  cursor: grab;
+  line-height: 1;
+  font-size: 14px;
+  opacity: 0.7;
+  flex: 0 0 auto;
+  margin-right: 10px;
+}
+
+.wt-row-drag-grip {
+  display: grid;
+  grid-template-columns: repeat(2, 4px);
+  grid-template-rows: repeat(3, 4px);
+  gap: 3px 4px;
+  padding: 4px 2px;
+}
+
+.wt-row-drag-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.9;
+}
+
+.wt-row-drag:hover,
+.wt-row-delete:hover {
+  opacity: 1;
+}
+
+.wt-row-drag:active {
+  cursor: grabbing;
+}
+
+.wt-row-dragging {
+  opacity: 0.7;
+}
+
 .wt-grid input:focus,
-.wt-offset-grid input[type="text"]:focus,
 .wt-time-combo select:focus {
   outline: 2px solid var(--ls-link-text-color, #4ea1ff);
   outline-offset: 1px;
@@ -192,8 +260,8 @@ body {
     grid-template-columns: 1fr;
   }
 
-  .wt-offset-grid {
-    grid-template-columns: minmax(110px, 1fr) minmax(160px, 1fr) 34px;
+  .wt-time-combo-offset-wide {
+    grid-column: auto;
   }
 }
 
@@ -214,6 +282,7 @@ body {
   margin-top: 10px;
   display: flex;
   justify-content: flex-start;
+  gap: 8px;
 }
 
 .wt-actions button,
@@ -224,6 +293,15 @@ body {
   color: var(--ls-primary-text-color, #eee);
   padding: 8px 12px;
   cursor: pointer;
+}
+
+.wt-row-actions button {
+  background: color-mix(
+    in srgb,
+    var(--ls-secondary-background-color, #222) 78%,
+    black 22%
+  );
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
 }
 
 .wt-actions button[data-variant="primary"] {

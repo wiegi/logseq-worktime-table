@@ -6,20 +6,15 @@ import {
   type InputRow,
 } from "./time";
 
-export interface OffsetPreset {
-  hours: number;
-  task: string;
-}
-
 export interface ModalResult {
   rows: InputRow[];
-  offsets: OffsetPreset[];
 }
 
 export interface ModalOpenOptions {
   initialRows?: InputRow[];
-  initialOffsets?: OffsetPreset[];
 }
+
+type TimeRowKind = "work" | "subtotal" | "offset";
 
 type ModalController = {
   open: (options?: ModalOpenOptions) => Promise<ModalResult | null>;
@@ -57,20 +52,9 @@ export function getModalController(): ModalController {
       </div>
 
       <div class="wt-row-actions">
-        <button type="button" id="wt-add-row">+ Add row</button>
-      </div>
-
-      <div class="wt-offsets">
-        <div class="wt-section-title">Worktime offsets</div>
-        <div class="wt-offset-grid" id="wt-offset-grid">
-          <div class="hdr">Hours (dec.)</div>
-          <div class="hdr">Task (optional)</div>
-          <div class="hdr wt-hdr-action"></div>
-        </div>
-
-        <div class="wt-row-actions">
-          <button type="button" id="wt-add-offset">+ Add offset</button>
-        </div>
+        <button type="button" id="wt-add-row">+ Add time range</button>
+        <button type="button" id="wt-add-offset">+ Add offset</button>
+        <button type="button" id="wt-add-subtotal">+ Add subtotal</button>
       </div>
 
       <div class="wt-error" id="wt-error" role="alert" aria-live="polite"></div>
@@ -86,21 +70,22 @@ export function getModalController(): ModalController {
   document.body.appendChild(overlay);
 
   const grid = modal.querySelector<HTMLDivElement>("#wt-grid");
-  const offsetGrid = modal.querySelector<HTMLDivElement>("#wt-offset-grid");
   const form = modal.querySelector<HTMLFormElement>("#wt-form");
   const error = modal.querySelector<HTMLDivElement>("#wt-error");
   const cancel = modal.querySelector<HTMLButtonElement>("#wt-cancel");
   const addRow = modal.querySelector<HTMLButtonElement>("#wt-add-row");
+  const addSubtotal =
+    modal.querySelector<HTMLButtonElement>("#wt-add-subtotal");
   const addOffset = modal.querySelector<HTMLButtonElement>("#wt-add-offset");
   const help = modal.querySelector<HTMLParagraphElement>("#wt-help");
 
   if (
     !grid ||
-    !offsetGrid ||
     !form ||
     !error ||
     !cancel ||
     !addRow ||
+    !addSubtotal ||
     !addOffset ||
     !help
   ) {
@@ -108,10 +93,8 @@ export function getModalController(): ModalController {
   }
 
   const addRowBtn = addRow;
-  const addOffsetBtn = addOffset;
 
   const gridEl = grid;
-  const offsetGridEl = offsetGrid;
 
   const errorEl = error;
   const formEl = form;
@@ -293,6 +276,17 @@ export function getModalController(): ModalController {
       : formatMinutesToClock24(minutes);
   }
 
+  function normalizeDialogValue(
+    value: string,
+    options?: { stripLeadingWhitespace?: boolean },
+  ): string {
+    const sanitized = String(value ?? "").replace(/<!--wt:offset-->/g, "");
+
+    return options?.stripLeadingWhitespace
+      ? sanitized.trimStart()
+      : sanitized.trim();
+  }
+
   function applyHelpText(use12HourClock: boolean): void {
     const mode = use12HourClock ? "12h (AM/PM)" : "24h (HH:mm)";
     helpEl.textContent =
@@ -301,9 +295,11 @@ export function getModalController(): ModalController {
       (use12HourClock
         ? `Tip: In 12h mode you can type "8:00" and pick AM/PM in the dropdown. `
         : `Tip: In 24h mode you can type "8:00" and it will be normalized to "08:00". `) +
+      `Use "+ Add subtotal" to insert a section summary row such as "Day subtotal". ` +
+      `Use "+ Add offset" to insert an adjustment row such as "Break". ` +
       `If both Start and End are present, End must be after Start. ` +
       `Incomplete rows are allowed but don't affect totals. ` +
-      `Task is optional. Empty rows are kept (template). ` +
+      `Task is optional. Empty rows must be removed or filled before confirming. ` +
       `Offsets add/subtract hours (use negative values to subtract).`;
   }
 
@@ -313,98 +309,15 @@ export function getModalController(): ModalController {
 
   const startCellEls: HTMLElement[] = [];
   const endCellEls: HTMLElement[] = [];
+  const actionCellEls: HTMLElement[] = [];
   const deleteButtons: HTMLButtonElement[] = [];
+  const dragButtons: HTMLButtonElement[] = [];
 
   const startAmPmSelects: Array<HTMLSelectElement | null> = [];
   const endAmPmSelects: Array<HTMLSelectElement | null> = [];
+  const rowKinds: TimeRowKind[] = [];
 
-  const offsetHoursInputs: HTMLInputElement[] = [];
-  const offsetTaskInputs: HTMLInputElement[] = [];
-  const offsetDeleteButtons: HTMLButtonElement[] = [];
-
-  const OFFSET_GRID_HEADER_CELLS = 3;
-
-  function removeOffsetRowByIndex(index: number): void {
-    const hours = offsetHoursInputs[index];
-    const task = offsetTaskInputs[index];
-    const del = offsetDeleteButtons[index];
-
-    const removeEl = (el: Element | undefined): void => {
-      if (!el) return;
-      if (el.parentElement === offsetGridEl) offsetGridEl.removeChild(el);
-    };
-
-    removeEl(hours);
-    removeEl(task);
-    removeEl(del);
-
-    offsetHoursInputs.splice(index, 1);
-    offsetTaskInputs.splice(index, 1);
-    offsetDeleteButtons.splice(index, 1);
-
-    if (offsetHoursInputs.length > 0) {
-      offsetHoursInputs[Math.min(index, offsetHoursInputs.length - 1)]?.focus();
-    } else {
-      addOffsetBtn.focus();
-    }
-  }
-
-  function removeOffsetRowByButton(btn: HTMLButtonElement): void {
-    const index = offsetDeleteButtons.indexOf(btn);
-    if (index < 0) return;
-    removeOffsetRowByIndex(index);
-  }
-
-  function addOffsetRow(): void {
-    const hours = document.createElement("input");
-    hours.type = "text";
-    hours.placeholder = "+1.00";
-    hours.inputMode = "decimal";
-    hours.autocomplete = "off";
-    hours.className = "wt-offset-hours";
-
-    const task = document.createElement("input");
-    task.type = "text";
-    task.placeholder = "optional";
-    task.autocomplete = "off";
-    task.className = "wt-offset-task";
-
-    const del = document.createElement("button");
-    del.type = "button";
-    del.className = "wt-row-delete";
-    del.textContent = "×";
-    del.title = "Delete offset";
-    del.setAttribute(
-      "aria-label",
-      `Delete offset ${offsetHoursInputs.length + 1}`,
-    );
-    del.addEventListener("click", () => removeOffsetRowByButton(del));
-
-    offsetHoursInputs.push(hours);
-    offsetTaskInputs.push(task);
-    offsetDeleteButtons.push(del);
-
-    offsetGridEl.appendChild(hours);
-    offsetGridEl.appendChild(task);
-    offsetGridEl.appendChild(del);
-  }
-
-  function resetOffsetRows(): void {
-    while (offsetGridEl.children.length > OFFSET_GRID_HEADER_CELLS) {
-      offsetGridEl.removeChild(offsetGridEl.lastElementChild as Element);
-    }
-    offsetHoursInputs.length = 0;
-    offsetTaskInputs.length = 0;
-    offsetDeleteButtons.length = 0;
-  }
-
-  function ensureOffsetRowCount(count: number): void {
-    const target = Math.max(0, Math.floor(count));
-    while (offsetHoursInputs.length > target) {
-      removeOffsetRowByIndex(offsetHoursInputs.length - 1);
-    }
-    while (offsetHoursInputs.length < target) addOffsetRow();
-  }
+  let draggingTimeRowIndex: number | null = null;
 
   const GRID_HEADER_CELLS = 4;
 
@@ -412,7 +325,7 @@ export function getModalController(): ModalController {
     const startCell = startCellEls[index];
     const endCell = endCellEls[index];
     const task = taskInputs[index];
-    const del = deleteButtons[index];
+    const actionCell = actionCellEls[index];
 
     const removeEl = (el: Element | undefined): void => {
       if (!el) return;
@@ -422,16 +335,19 @@ export function getModalController(): ModalController {
     removeEl(startCell);
     removeEl(endCell);
     removeEl(task);
-    removeEl(del);
+    removeEl(actionCell);
 
     taskInputs.splice(index, 1);
     startInputs.splice(index, 1);
     endInputs.splice(index, 1);
     startAmPmSelects.splice(index, 1);
     endAmPmSelects.splice(index, 1);
+    rowKinds.splice(index, 1);
     startCellEls.splice(index, 1);
     endCellEls.splice(index, 1);
+    actionCellEls.splice(index, 1);
     deleteButtons.splice(index, 1);
+    dragButtons.splice(index, 1);
 
     if (startInputs.length > 0) {
       startInputs[Math.min(index, startInputs.length - 1)]?.focus();
@@ -476,24 +392,153 @@ export function getModalController(): ModalController {
     return { time: `${hours12}:${mm}`, ampm: isPm ? "PM" : "AM" };
   }
 
-  function addTimeRow(use12HourClock: boolean): void {
+  function moveArrayItem<T>(
+    items: T[],
+    fromIndex: number,
+    toIndex: number,
+  ): void {
+    if (fromIndex === toIndex) return;
+    const [item] = items.splice(fromIndex, 1);
+    if (item === undefined) return;
+    items.splice(toIndex, 0, item);
+  }
+
+  function syncTimeRowDomOrder(): void {
+    for (let i = 0; i < startInputs.length; i++) {
+      gridEl.appendChild(startCellEls[i]!);
+      gridEl.appendChild(endCellEls[i]!);
+      gridEl.appendChild(taskInputs[i]!);
+      gridEl.appendChild(actionCellEls[i]!);
+    }
+  }
+
+  function setTimeRowDraggingState(index: number, active: boolean): void {
+    startCellEls[index]?.classList.toggle("wt-row-dragging", active);
+    endCellEls[index]?.classList.toggle("wt-row-dragging", active);
+    taskInputs[index]?.classList.toggle("wt-row-dragging", active);
+    actionCellEls[index]?.classList.toggle("wt-row-dragging", active);
+  }
+
+  function getTimeRowIndexFromTarget(target: EventTarget | null): number {
+    if (!(target instanceof Node)) return -1;
+    for (let i = 0; i < startInputs.length; i++) {
+      const elements = [
+        startCellEls[i],
+        endCellEls[i],
+        taskInputs[i],
+        actionCellEls[i],
+      ];
+      if (elements.some((el) => el === target || el?.contains(target))) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  function moveTimeRow(fromIndex: number, insertIndex: number): number {
+    const rowCount = startInputs.length;
+    if (fromIndex < 0 || fromIndex >= rowCount) return fromIndex;
+
+    const boundedInsertIndex = Math.max(0, Math.min(insertIndex, rowCount));
+    let targetIndex = boundedInsertIndex;
+    if (targetIndex > fromIndex) targetIndex--;
+    if (targetIndex === fromIndex) return fromIndex;
+
+    setTimeRowDraggingState(fromIndex, false);
+
+    moveArrayItem(taskInputs, fromIndex, targetIndex);
+    moveArrayItem(startInputs, fromIndex, targetIndex);
+    moveArrayItem(endInputs, fromIndex, targetIndex);
+    moveArrayItem(startAmPmSelects, fromIndex, targetIndex);
+    moveArrayItem(endAmPmSelects, fromIndex, targetIndex);
+    moveArrayItem(rowKinds, fromIndex, targetIndex);
+    moveArrayItem(startCellEls, fromIndex, targetIndex);
+    moveArrayItem(endCellEls, fromIndex, targetIndex);
+    moveArrayItem(actionCellEls, fromIndex, targetIndex);
+    moveArrayItem(deleteButtons, fromIndex, targetIndex);
+    moveArrayItem(dragButtons, fromIndex, targetIndex);
+
+    syncTimeRowDomOrder();
+    setTimeRowDraggingState(targetIndex, true);
+    return targetIndex;
+  }
+
+  function addTimeRow(
+    use12HourClock: boolean,
+    rowKind: TimeRowKind = "work",
+  ): void {
     const task = document.createElement("input");
     task.type = "text";
-    task.placeholder = "optional";
+    task.placeholder =
+      rowKind === "subtotal"
+        ? "Subtotal"
+        : rowKind === "offset"
+          ? "Break"
+          : "optional";
     task.autocomplete = "on";
-    task.className = "wt-task";
+    task.className =
+      rowKind === "subtotal"
+        ? "wt-task wt-task-subtotal"
+        : rowKind === "offset"
+          ? "wt-task wt-task-offset"
+          : "wt-task wt-task-work";
+    if (rowKind === "subtotal") task.value = "Subtotal";
 
     const start = document.createElement("input");
     start.type = "text";
-    start.placeholder = use12HourClock ? "8:00" : "08:00";
-    start.inputMode = use12HourClock ? "numeric" : "text";
-    start.autocomplete = "on";
+    start.placeholder =
+      rowKind === "subtotal"
+        ? "subtotal"
+        : rowKind === "offset"
+          ? "+1.00"
+          : use12HourClock
+            ? "8:00"
+            : "08:00";
+    start.inputMode =
+      rowKind === "subtotal"
+        ? "text"
+        : rowKind === "offset"
+          ? "decimal"
+          : use12HourClock
+            ? "numeric"
+            : "text";
+    start.autocomplete = rowKind === "offset" ? "off" : "on";
 
     const end = document.createElement("input");
     end.type = "text";
-    end.placeholder = use12HourClock ? "5:00" : "17:00";
-    end.inputMode = use12HourClock ? "numeric" : "text";
-    end.autocomplete = "on";
+    end.placeholder =
+      rowKind === "subtotal"
+        ? "section total"
+        : rowKind === "offset"
+          ? "offset"
+          : use12HourClock
+            ? "5:00"
+            : "17:00";
+    end.inputMode =
+      rowKind === "subtotal"
+        ? "text"
+        : rowKind === "offset"
+          ? "text"
+          : use12HourClock
+            ? "numeric"
+            : "text";
+    end.autocomplete = rowKind === "offset" ? "off" : "on";
+
+    if (rowKind === "subtotal" || rowKind === "offset") {
+      start.disabled = true;
+      end.disabled = true;
+      start.classList.add(
+        rowKind === "offset" ? "wt-offset-input" : "wt-subtotal-input",
+      );
+      end.classList.add(
+        rowKind === "offset" ? "wt-offset-input" : "wt-subtotal-input",
+      );
+    }
+
+    if (rowKind === "offset") {
+      start.disabled = false;
+      start.value = "";
+    }
 
     const startNow = document.createElement("button");
     startNow.type = "button";
@@ -518,6 +563,40 @@ export function getModalController(): ModalController {
     taskInputs.push(task);
     startInputs.push(start);
     endInputs.push(end);
+    rowKinds.push(rowKind);
+
+    const actionCell = document.createElement("div");
+    actionCell.className = "wt-row-controls";
+
+    const drag = document.createElement("button");
+    drag.type = "button";
+    drag.className = "wt-row-drag";
+    drag.title = "Drag to reorder row";
+    drag.draggable = true;
+    drag.setAttribute("aria-label", `Drag row ${startInputs.length}`);
+    const dragGrip = document.createElement("span");
+    dragGrip.className = "wt-row-drag-grip";
+    dragGrip.setAttribute("aria-hidden", "true");
+    for (let dotIndex = 0; dotIndex < 6; dotIndex++) {
+      const dot = document.createElement("span");
+      dot.className = "wt-row-drag-dot";
+      dragGrip.appendChild(dot);
+    }
+    drag.appendChild(dragGrip);
+    drag.addEventListener("dragstart", (event) => {
+      draggingTimeRowIndex = dragButtons.indexOf(drag);
+      if (draggingTimeRowIndex < 0) return;
+      event.dataTransfer?.setData("text/plain", String(draggingTimeRowIndex));
+      if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+      setTimeRowDraggingState(draggingTimeRowIndex, true);
+    });
+    drag.addEventListener("dragend", () => {
+      if (draggingTimeRowIndex !== null) {
+        setTimeRowDraggingState(draggingTimeRowIndex, false);
+      }
+      draggingTimeRowIndex = null;
+    });
+    dragButtons.push(drag);
 
     const del = document.createElement("button");
     del.type = "button";
@@ -528,7 +607,39 @@ export function getModalController(): ModalController {
     del.addEventListener("click", () => removeTimeRowByButton(del));
     deleteButtons.push(del);
 
-    if (use12HourClock) {
+    actionCell.appendChild(del);
+    actionCellEls.push(actionCell);
+
+    if (rowKind === "subtotal" || rowKind === "offset") {
+      startAmPmSelects.push(null);
+      endAmPmSelects.push(null);
+
+      const startWrap = document.createElement("div");
+      startWrap.className =
+        rowKind === "offset"
+          ? "wt-time-combo wt-time-combo-offset wt-time-combo-offset-wide"
+          : "wt-time-combo wt-time-combo-subtotal";
+
+      const endWrap = document.createElement("div");
+      endWrap.className =
+        rowKind === "offset"
+          ? "wt-time-combo wt-time-combo-offset wt-time-combo-offset-hidden"
+          : "wt-time-combo wt-time-combo-subtotal";
+
+      if (rowKind === "offset") {
+        startWrap.appendChild(drag);
+        startWrap.appendChild(start);
+        endWrap.appendChild(end);
+      } else {
+        startWrap.appendChild(drag);
+      }
+
+      gridEl.appendChild(startWrap);
+      gridEl.appendChild(endWrap);
+
+      startCellEls.push(startWrap);
+      endCellEls.push(endWrap);
+    } else if (use12HourClock) {
       const startWrap = document.createElement("div");
       startWrap.className = "wt-time-combo";
       const startAmPm = createAmPmSelect(
@@ -542,6 +653,7 @@ export function getModalController(): ModalController {
         startAmPm.value = p.ampm;
         start.focus();
       });
+      startWrap.appendChild(drag);
       startWrap.appendChild(start);
       startWrap.appendChild(startAmPm);
       startWrap.appendChild(startNow);
@@ -577,6 +689,7 @@ export function getModalController(): ModalController {
         start.value = formatMinutesToClock24(getNowMinutes());
         start.focus();
       });
+      startWrap.appendChild(drag);
       startWrap.appendChild(start);
       startWrap.appendChild(startNow);
 
@@ -597,7 +710,7 @@ export function getModalController(): ModalController {
       endCellEls.push(endWrap);
     }
     gridEl.appendChild(task);
-    gridEl.appendChild(del);
+    gridEl.appendChild(actionCell);
   }
 
   function resetTimeRows(): void {
@@ -609,15 +722,18 @@ export function getModalController(): ModalController {
     endInputs.length = 0;
     startAmPmSelects.length = 0;
     endAmPmSelects.length = 0;
+    rowKinds.length = 0;
     startCellEls.length = 0;
     endCellEls.length = 0;
+    actionCellEls.length = 0;
     deleteButtons.length = 0;
+    dragButtons.length = 0;
   }
 
   function ensureTimeRowCount(count: number): void {
     const target = Math.max(1, Math.floor(count));
     const use12HourClock = readUse12HourClockFromSettings();
-    while (startInputs.length < target) addTimeRow(use12HourClock);
+    while (startInputs.length < target) addTimeRow(use12HourClock, "work");
   }
 
   let resolvePromise: ((v: ModalResult | null) => void) | null = null;
@@ -646,8 +762,33 @@ export function getModalController(): ModalController {
   function readRows(): InputRow[] {
     const rows: InputRow[] = [];
     for (let i = 0; i < startInputs.length; i++) {
+      const rowKind = rowKinds[i] ?? "work";
+      if (rowKind === "subtotal") {
+        rows.push({
+          kind: "subtotal",
+          task: normalizeDialogValue(taskInputs[i]?.value ?? "Subtotal", {
+            stripLeadingWhitespace: true,
+          }),
+          start: "",
+          end: "",
+        });
+        continue;
+      }
+
       const startRaw = startInputs[i]?.value ?? "";
       const endRaw = endInputs[i]?.value ?? "";
+
+      if (rowKind === "offset") {
+        rows.push({
+          kind: "offset",
+          task: normalizeDialogValue(taskInputs[i]?.value ?? "", {
+            stripLeadingWhitespace: true,
+          }),
+          start: normalizeDialogValue(startRaw),
+          end: "",
+        });
+        continue;
+      }
 
       const startSel = startAmPmSelects[i];
       const endSel = endAmPmSelects[i];
@@ -665,28 +806,15 @@ export function getModalController(): ModalController {
           : endRaw;
 
       rows.push({
-        task: taskInputs[i]?.value ?? "",
-        start,
-        end,
+        task: normalizeDialogValue(taskInputs[i]?.value ?? "", {
+          stripLeadingWhitespace: true,
+        }),
+        start: normalizeDialogValue(start),
+        end: normalizeDialogValue(end),
+        kind: "work",
       });
     }
     return rows;
-  }
-
-  function readOffsets(): OffsetPreset[] {
-    const presets: OffsetPreset[] = [];
-    for (let i = 0; i < offsetHoursInputs.length; i++) {
-      const hoursRaw = String(offsetHoursInputs[i]?.value ?? "").trim();
-      const task = String(offsetTaskInputs[i]?.value ?? "");
-
-      const normalized = hoursRaw.replace(",", ".");
-      const hours = normalized.length === 0 ? 0 : Number(normalized);
-      presets.push({
-        hours: Number.isFinite(hours) ? hours : NaN,
-        task,
-      });
-    }
-    return presets;
   }
 
   function closeWith(result: ModalResult | null): void {
@@ -707,89 +835,58 @@ export function getModalController(): ModalController {
       const start = startInputs[i];
       const end = endInputs[i];
       if (!task || !start || !end) continue;
-      task.value = row?.task ?? "";
+      task.value = normalizeDialogValue(
+        row?.task ?? (row?.kind === "subtotal" ? "Subtotal" : ""),
+        { stripLeadingWhitespace: true },
+      );
+
+      if (row?.kind === "subtotal") {
+        start.value = "";
+        end.value = "";
+        continue;
+      }
+
+      if (row?.kind === "offset") {
+        start.value = normalizeDialogValue(row?.start ?? "");
+        end.value = "";
+        continue;
+      }
 
       if (use12HourClock) {
         const startSel = startAmPmSelects[i];
         const endSel = endAmPmSelects[i];
 
-        const startMinutes = parseTimeToMinutes((row?.start ?? "").trim());
+        const normalizedStart = normalizeDialogValue(row?.start ?? "");
+        const startMinutes = parseTimeToMinutes(normalizedStart);
         if (startMinutes !== null) {
           const p = minutesTo12hParts(startMinutes);
           start.value = p.time;
           if (startSel) startSel.value = p.ampm;
         } else {
-          start.value = (row?.start ?? "").trim();
+          start.value = normalizedStart;
           if (startSel) startSel.value = "AM";
         }
 
-        const endMinutes = parseTimeToMinutes((row?.end ?? "").trim());
+        const normalizedEnd = normalizeDialogValue(row?.end ?? "");
+        const endMinutes = parseTimeToMinutes(normalizedEnd);
         if (endMinutes !== null) {
           const p = minutesTo12hParts(endMinutes);
           end.value = p.time;
           if (endSel) endSel.value = p.ampm;
         } else {
-          end.value = (row?.end ?? "").trim();
+          end.value = normalizedEnd;
           if (endSel) endSel.value = "PM";
         }
       } else {
-        start.value = normalizeTimeDisplay(row?.start ?? "", false);
-        end.value = normalizeTimeDisplay(row?.end ?? "", false);
+        start.value = normalizeTimeDisplay(
+          normalizeDialogValue(row?.start ?? ""),
+          false,
+        );
+        end.value = normalizeTimeDisplay(
+          normalizeDialogValue(row?.end ?? ""),
+          false,
+        );
       }
-    }
-  }
-
-  function readOffsetsFromSettings(): OffsetPreset[] {
-    const s = (logseq as any).settings as Record<string, unknown> | undefined;
-    const readHours = (value: unknown): number => {
-      if (typeof value === "number" && Number.isFinite(value)) return value;
-      if (typeof value === "string") {
-        const normalized = value.trim().replace(",", ".");
-        if (normalized.length === 0) return 0;
-        const n = Number(normalized);
-        return Number.isFinite(n) ? n : 0;
-      }
-      return 0;
-    };
-
-    const rawPrefill =
-      typeof s?.dialogPrefillJson === "string"
-        ? (s.dialogPrefillJson as string)
-        : "";
-
-    if (rawPrefill.trim().length > 0) {
-      try {
-        const parsed = JSON.parse(rawPrefill) as any;
-        const offsetsCandidate = Array.isArray(parsed)
-          ? parsed
-          : Array.isArray(parsed?.offsets)
-            ? parsed.offsets
-            : null;
-
-        if (Array.isArray(offsetsCandidate)) {
-          const presets: OffsetPreset[] = offsetsCandidate.map((p: any) => ({
-            hours: readHours(p?.hours),
-            task: typeof p?.task === "string" ? p.task : "",
-          }));
-          if (presets.length > 0) return presets;
-        }
-      } catch {}
-    }
-
-    return [];
-  }
-
-  function setInputsFromOffsets(offsets: OffsetPreset[]): void {
-    for (let i = 0; i < offsetHoursInputs.length; i++) {
-      const o = offsets[i];
-      const hours = offsetHoursInputs[i];
-      const task = offsetTaskInputs[i];
-      if (!hours || !task) continue;
-      hours.value =
-        typeof o?.hours === "number" && Number.isFinite(o.hours)
-          ? String(o.hours)
-          : "";
-      task.value = o?.task ?? "";
     }
   }
 
@@ -805,13 +902,39 @@ export function getModalController(): ModalController {
   cancel.addEventListener("click", () => closeWith(null));
 
   addRow.addEventListener("click", () => {
-    addTimeRow(readUse12HourClockFromSettings());
+    addTimeRow(readUse12HourClockFromSettings(), "work");
     startInputs[startInputs.length - 1]?.focus();
   });
 
+  addSubtotal.addEventListener("click", () => {
+    addTimeRow(readUse12HourClockFromSettings(), "subtotal");
+    taskInputs[taskInputs.length - 1]?.focus();
+  });
+
   addOffset.addEventListener("click", () => {
-    addOffsetRow();
-    offsetHoursInputs[offsetHoursInputs.length - 1]?.focus();
+    addTimeRow(readUse12HourClockFromSettings(), "offset");
+    startInputs[startInputs.length - 1]?.focus();
+  });
+
+  gridEl.addEventListener("dragover", (event) => {
+    if (draggingTimeRowIndex === null) return;
+    event.preventDefault();
+    const rowIndex = getTimeRowIndexFromTarget(event.target);
+    if (rowIndex < 0) return;
+
+    const anchorEl = taskInputs[rowIndex] ?? startCellEls[rowIndex];
+    if (!anchorEl) return;
+    const rect = anchorEl.getBoundingClientRect();
+    const insertIndex =
+      event.clientY > rect.top + rect.height / 2 ? rowIndex + 1 : rowIndex;
+    draggingTimeRowIndex = moveTimeRow(draggingTimeRowIndex, insertIndex);
+  });
+
+  gridEl.addEventListener("drop", (event) => {
+    if (draggingTimeRowIndex === null) return;
+    event.preventDefault();
+    setTimeRowDraggingState(draggingTimeRowIndex, false);
+    draggingTimeRowIndex = null;
   });
 
   controller = {
@@ -825,14 +948,21 @@ export function getModalController(): ModalController {
 
       resetTimeRows();
       const initialRows = options?.initialRows ?? [];
-      ensureTimeRowCount(initialRows.length > 0 ? initialRows.length : 1);
+      if (initialRows.length > 0) {
+        for (const row of initialRows) {
+          addTimeRow(
+            use12HourClock,
+            row.kind === "subtotal"
+              ? "subtotal"
+              : row.kind === "offset"
+                ? "offset"
+                : "work",
+          );
+        }
+      } else {
+        ensureTimeRowCount(1);
+      }
       setInputsFromRows(initialRows, use12HourClock);
-
-      resetOffsetRows();
-      const initialOffsets =
-        options?.initialOffsets ?? readOffsetsFromSettings();
-      ensureOffsetRowCount(initialOffsets.length);
-      setInputsFromOffsets(initialOffsets);
 
       (logseq as any).setMainUIInlineStyle?.({
         position: "fixed",
@@ -841,7 +971,9 @@ export function getModalController(): ModalController {
       });
 
       setOpen(true);
-      startInputs[0]?.focus();
+      if (rowKinds[0] === "subtotal") taskInputs[0]?.focus();
+      else if (rowKinds[0] === "offset") startInputs[0]?.focus();
+      else startInputs[0]?.focus();
 
       return new Promise<ModalResult | null>((resolve) => {
         resolvePromise = resolve;
@@ -855,19 +987,31 @@ export function getModalController(): ModalController {
           ev.preventDefault();
 
           const rows = readRows();
-          const offsets = readOffsets();
 
-          let hasAny = false;
+          clearError();
           for (let i = 0; i < rows.length; i++) {
             const row = rows[i];
             if (!row) continue;
-            if (isRowEmpty(row)) continue;
-            hasAny = true;
+            if (isRowEmpty(row)) {
+              showError(
+                `Row ${i + 1} is empty. Remove it or fill in a value before confirming.`,
+              );
+              if (row.kind === "offset") {
+                startInputs[i]?.focus();
+              } else {
+                startInputs[i]?.focus();
+              }
+              return;
+            }
 
             const v = validateRow(row);
             if (!v.ok) {
               showError(`Row ${i + 1}: ${v.message}`);
-              if (
+              if (row.kind === "subtotal") {
+                taskInputs[i]?.focus();
+              } else if (row.kind === "offset") {
+                startInputs[i]?.focus();
+              } else if (
                 row.start.trim().length > 0 &&
                 parseTimeToMinutes(row.start) === null
               ) {
@@ -884,18 +1028,7 @@ export function getModalController(): ModalController {
             }
           }
 
-          for (let i = 0; i < offsets.length; i++) {
-            const o = offsets[i];
-            if (!o) continue;
-            if (!Number.isFinite(o.hours)) {
-              showError(`Offset ${i + 1}: Hours must be a number.`);
-              offsetHoursInputs[i]?.focus();
-              return;
-            }
-            const minutes = Math.round(o.hours * 60);
-            if (minutes !== 0) hasAny = true;
-          }
-          closeWith({ rows, offsets });
+          closeWith({ rows });
         };
 
         currentSubmitHandler = onSubmit;
