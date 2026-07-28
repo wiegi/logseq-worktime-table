@@ -1,6 +1,8 @@
 # logseq-worktime-table
 A Logseq plugin for creating and editing Markdown-based worktime tables directly in your notes or journal. It helps you record work sessions, calculate total working time, and apply manual offsets such as breaks or corrections.
 
+Works with both Logseq file graphs (Logseq OG/Markdown) and Logseq DB graphs.
+
 ## Features
 * Create worktime tables from the Logseq slash command menu
 * Record multiple entries with task, start time, end time, and duration
@@ -10,6 +12,7 @@ A Logseq plugin for creating and editing Markdown-based worktime tables directly
 * Reopen and edit existing tables from the block context menu
 * Optional 12-hour clock display with AM/PM selection
 * Export tables as CSV files
+* Use the same workflow in file graphs and DB graphs
 
 
 ## Screenshots / Demo

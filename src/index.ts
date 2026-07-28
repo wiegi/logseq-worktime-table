@@ -1,5 +1,13 @@
 import "@logseq/libs";
 
+import {
+  detectGraphKind,
+  getBlockText,
+  getJournalDayIso,
+  getPageDisplayName,
+  getPageForBlock,
+  insertMarkdownAtCursor,
+} from "./logseqCompat";
 import type { InputRow } from "./time";
 
 const SLASH_COMMAND_WORKTIME = "Worktime Table: Create table";
@@ -27,7 +35,7 @@ type LegacyOffsetPrefill = {
 type TopGuard = {
   activeToken: string;
   handlers?: {
-    worktime?: () => Promise<void>;
+    worktime?: (uuid?: string) => Promise<void>;
     edit?: (uuid?: string) => Promise<void>;
     exportCsv?: (uuid?: string) => Promise<void>;
   };
@@ -79,8 +87,7 @@ async function delegateToActiveInstance(
   const guard = getTopGuard();
   const handler = guard?.handlers?.[kind];
   if (typeof handler !== "function") return false;
-  if (kind === "edit" || kind === "exportCsv") await handler(uuid);
-  else await handler();
+  await handler(uuid);
   return true;
 }
 
@@ -94,34 +101,15 @@ function sanitizeFilenamePart(value: string): string {
     .slice(0, 80);
 }
 
-function journalDayToISO(journalDay: number): string | null {
-  const s = String(Math.floor(journalDay));
-  if (!/^\d{8}$/.test(s)) return null;
-  const yyyy = s.slice(0, 4);
-  const mm = s.slice(4, 6);
-  const dd = s.slice(6, 8);
-  return `${yyyy}-${mm}-${dd}`;
-}
-
 async function suggestCsvFilenameFromBlock(uuid: string): Promise<string> {
   try {
     const block = await logseq.Editor.getBlock(uuid);
-    const pageId = (block as any)?.page?.id;
-    if (typeof pageId === "number") {
-      const page = await logseq.Editor.getPage(pageId);
-      const isJournal = Boolean((page as any)?.["journal?"]);
-      const journalDay = (page as any)?.journalDay;
-      if (isJournal && typeof journalDay === "number") {
-        const iso = journalDayToISO(journalDay);
-        if (iso) return `worktime-table_${iso}.csv`;
-      }
+    const page = await getPageForBlock(logseq.Editor, block);
+    if (page) {
+      const iso = getJournalDayIso(page);
+      if (iso) return `worktime-table_${iso}.csv`;
 
-      const name =
-        typeof (page as any)?.originalName === "string"
-          ? ((page as any).originalName as string)
-          : typeof (page as any)?.name === "string"
-            ? ((page as any).name as string)
-            : "";
+      const name = getPageDisplayName(page);
       const safe = sanitizeFilenamePart(name);
       return `worktime-table_${safe}.csv`;
     }
@@ -333,19 +321,11 @@ function registerInlineEditButton(): void {
   });
 }
 
-async function insertAtCursor(markdown: string): Promise<void> {
-  const editorAny = logseq.Editor as any;
-  if (typeof editorAny.insertAtEditingCursor === "function") {
-    await editorAny.insertAtEditingCursor(markdown);
-    return;
-  }
-
-  const current = (await editorAny.getCurrentBlock?.()) as any;
-  const uuid =
-    typeof current?.uuid === "string" ? (current.uuid as string) : null;
-  if (!uuid) throw new Error("No active block/cursor found.");
-
-  await logseq.Editor.insertBlock(uuid, markdown, { sibling: true });
+async function insertAtCursor(
+  markdown: string,
+  commandBlockUuid?: string,
+): Promise<void> {
+  await insertMarkdownAtCursor(logseq.Editor, markdown, commandBlockUuid);
 }
 
 async function getTargetBlockUuid(contextUuid?: string): Promise<string> {
@@ -371,9 +351,9 @@ async function updateBlockContent(
   throw new Error("Logseq API updateBlock is not available.");
 }
 
-async function commandWorktime(): Promise<void> {
+async function commandWorktime(commandBlockUuid?: string): Promise<void> {
   if (!isActiveInstance()) {
-    await delegateToActiveInstance("worktime");
+    await delegateToActiveInstance("worktime", commandBlockUuid);
     return;
   }
 
@@ -414,7 +394,7 @@ async function commandWorktime(): Promise<void> {
         showTotalRowTimeRange: !readDisableTotalRowTimeRangeFromSettings(),
       }),
     );
-    await insertAtCursor(md);
+    await insertAtCursor(md, commandBlockUuid);
     showMsg("Worktime table inserted.", "success");
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Unknown error.";
@@ -442,10 +422,7 @@ async function commandEditTable(contextUuid?: string): Promise<void> {
   try {
     uuid = await getTargetBlockUuid(contextUuid);
     const block = await logseq.Editor.getBlock(uuid);
-    content =
-      typeof (block as any)?.content === "string"
-        ? ((block as any).content as string)
-        : "";
+    content = getBlockText(block);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Unknown error.";
     showMsg(msg, "error");
@@ -501,10 +478,7 @@ async function commandExportCsv(contextUuid?: string): Promise<void> {
   try {
     uuid = await getTargetBlockUuid(contextUuid);
     const block = await logseq.Editor.getBlock(uuid);
-    content =
-      typeof (block as any)?.content === "string"
-        ? ((block as any).content as string)
-        : "";
+    content = getBlockText(block);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Unknown error.";
     showMsg(msg, "error");
@@ -529,7 +503,7 @@ async function commandExportCsv(contextUuid?: string): Promise<void> {
   showMsg(`Exported CSV: ${filename}`, "success");
 }
 
-function registerCommands(): void {
+async function registerCommands(): Promise<void> {
   const g = globalThis as any;
   const alreadyInit = Boolean(g[INIT_GUARD_KEY]);
   if (!alreadyInit) g[INIT_GUARD_KEY] = true;
@@ -562,6 +536,11 @@ function registerCommands(): void {
   ]);
 
   activateThisInstance();
+
+  const graphKind = await detectGraphKind(logseq.App);
+  console.info(
+    `[logseq-worktime-table] initialized for ${graphKind} graph`,
+  );
 
   (logseq as any).setMainUIInlineStyle?.({
     display: "none",
@@ -673,8 +652,8 @@ function registerCommands(): void {
 
   registerInlineEditButton();
 
-  logseq.Editor.registerSlashCommand(SLASH_COMMAND_WORKTIME, () =>
-    commandWorktime(),
+  logseq.Editor.registerSlashCommand(SLASH_COMMAND_WORKTIME, ({ uuid }) =>
+    commandWorktime(uuid),
   );
 }
 
